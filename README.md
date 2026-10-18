@@ -58,6 +58,19 @@ Env vars: `OLLAMA_URL` (default `http://localhost:11434`), `OLLAMA_MODEL` (defau
 | `POST /alerts/{id}/explain` | generate (and store) LLM or template explanation |
 | `GET /report/{upload_id}` | full Markdown incident report |
 | `GET /stats`, `GET /health` | counters / Ollama status |
+| `PATCH /alerts/{id}/status` | move a case: New -> In Progress / Escalated -> Closed (closing needs a disposition) |
+| `PATCH /alerts/{id}/assign` | assign the alert to an analyst |
+| `POST /alerts/{id}/notes`, `GET /alerts/{id}/activity` | analyst notes and the full audit trail |
+| `GET /metrics` | SOC KPIs: queue by status, MTTA, MTTR, false-positive rate overall and per rule |
+
+## Case workflow (alert triage like a real ticket queue)
+Every alert is a case: **New -> In Progress -> Escalated -> Closed**. Closing requires a disposition:
+*True Positive*, *Benign True Positive* (real but authorised) or *False Positive*. Every assignment, status change
+and note is written to an audit trail with the analyst's name and a UTC timestamp.
+
+The **Case queue** tab tracks the KPIs a SOC manager reports:
+- **MTTA** (mean time to acknowledge) and **MTTR** (mean time to resolve)
+- **False-positive rate**, overall and **per rule**, which shows which detections need tuning
 
 ## Supported log formats
 - Linux SSH `auth.log` (Failed password / Accepted password / Invalid user)

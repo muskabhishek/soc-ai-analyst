@@ -102,3 +102,53 @@ def test_api_end_to_end(monkeypatch):
     assert c.post("/upload-logs", files={"file": ("x.log", "nothing here")}).status_code == 400
     assert c.get("/alerts/9999").status_code == 404
     assert c.get("/stats").json()["alerts"] == 5
+
+
+def test_case_workflow_and_metrics(tmp_path):
+    from src import db
+    path = str(tmp_path / "cases.db")
+    db.init_db(path)
+    lines, _ = generate_linux_log()
+    df, alerts = analyze_text("\n".join(lines))
+    _, ids = db.save_analysis("auth.log", df, alerts, path=path)
+    assert all(r["status"] == "New" for r in db.list_alerts(path=path))
+
+    db.assign(ids[0], "alice", "lead", path=path)
+    db.update_status(ids[0], "Escalated", "alice", note="root compromised, handing to IR", path=path)
+    db.update_status(ids[0], "Closed", "alice", "True Positive", path=path)
+    db.update_status(ids[1], "Closed", "bob", "False Positive", path=path)
+    try:
+        db.update_status(ids[2], "Closed", "bob", path=path)        # no disposition
+        assert False, "closing without a disposition must fail"
+    except ValueError:
+        pass
+
+    a = db.get_alert(ids[0], path=path)
+    assert a["status"] == "Closed" and a["disposition"] == "True Positive" and a["assignee"] == "alice"
+    actions = [e["action"] for e in db.get_activity(ids[0], path=path)]
+    assert actions == ["created", "assign", "status", "note", "status"]
+
+    m = db.case_metrics(path=path)
+    assert m["closed"] == 2 and m["open"] == len(alerts) - 2
+    assert m["false_positive_rate_pct"] == 50.0
+    assert m["mtta_minutes"] is not None and m["mttr_minutes"] is not None
+    assert {r["rule"] for r in m["fp_rate_by_rule"]} == {alerts[0]["rule"], alerts[1]["rule"]}
+
+
+def test_case_api(monkeypatch, tmp_path):
+    from src import db
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "api.db"))
+    db.init_db()
+    from api.main import app
+    c = TestClient(app)
+    lines, _ = generate_linux_log()
+    aid = c.post("/upload-logs", files={"file": ("auth.log", "\n".join(lines))}).json()["alerts"][0]["id"]
+    assert c.patch(f"/alerts/{aid}/assign", json={"assignee": "alice"}).json()["assignee"] == "alice"
+    assert c.patch(f"/alerts/{aid}/status", json={"status": "Closed"}).status_code == 422
+    r = c.patch(f"/alerts/{aid}/status", json={"status": "Closed", "disposition": "True Positive", "note": "confirmed"})
+    assert r.json()["status"] == "Closed"
+    assert len(c.post(f"/alerts/{aid}/notes", json={"text": "lessons learned"}).json()) == 5
+    assert c.get(f"/alerts/{aid}/activity").json()[-1]["detail"] == "lessons learned"
+    assert c.get("/metrics").json()["closed"] == 1
+    assert c.get("/alerts?status=Closed").json()[0]["id"] == aid
+    assert c.patch("/alerts/9999/status", json={"status": "New"}).status_code == 404

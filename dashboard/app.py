@@ -87,6 +87,8 @@ with st.sidebar:
         st.warning("Ollama not running: template reports are used", icon="🟠")
     use_llm = st.toggle("Use LLM for explanations", value=live, disabled=not live)
     model = st.text_input("Model", OLLAMA_MODEL)
+    st.divider()
+    analyst = st.text_input("Analyst name", "analyst1", help="Recorded on status changes and notes")
 
 # ---------- analyse only when the input changes (so button clicks don't reset state) ----------
 text, name = None, None
@@ -104,8 +106,10 @@ if text is not None:
     df, alerts = analyze_text(text)
     st.session_state.update(df=df, alerts=alerts, name=name, explanations={})
     st.session_state.pop("report", None)
+    st.session_state["db_ids"] = {}
     if not df.empty:
-        db.save_analysis(name, df, alerts)
+        upload_id, ids = db.save_analysis(name, df, alerts)
+        st.session_state["db_ids"] = {a["alert_id"]: i for a, i in zip(alerts, ids)}
 
 hero()
 
@@ -131,7 +135,10 @@ kpi(k[3], "Suspicious IPs", len({a["source_ip"] for a in alerts}), "unique sourc
 kpi(k[4], "Failed logins", f"{len(fails):,}", f"{len(fails) / len(df):.0%} of all events", "#0ea5e9")
 st.write("")
 
-tab_overview, tab_alerts, tab_report = st.tabs(["📊 Overview", "🚨 Alerts & investigation", "📄 Incident report"])
+tab_overview, tab_alerts, tab_cases, tab_report = st.tabs(
+    ["📊 Overview", "🚨 Alerts & investigation", "🗂️ Case queue", "📄 Incident report"])
+db_ids = st.session_state.get("db_ids", {})
+case = {r["id"]: r for r in db.list_alerts()} if db_ids else {}
 
 # ---------- Overview ----------
 with tab_overview:
@@ -173,6 +180,7 @@ with tab_alerts:
     else:
         table = pd.DataFrame([{"ID": a["alert_id"], "Severity": f"{SEV_DOTS[a['severity']]} {a['severity']}",
                                "Risk score": a["risk_score"], "Rule": a["rule"].replace("_", " ").title(),
+                               "Status": case.get(db_ids.get(a["alert_id"]), {}).get("status", "-"),
                                "Source IP": a["source_ip"], "Events": a["count"],
                                "MITRE": a["mitre"]["id"], "First seen": a["start"]} for a in alerts])
         st.dataframe(table, width="stretch", hide_index=True, column_config={
@@ -208,6 +216,70 @@ with tab_alerts:
                 st.markdown(ex["text"])
                 for w in ex["warnings"]:
                     st.warning(w)
+
+        # ----- case handling for the selected alert -----
+        cid = db_ids.get(sel)
+        if cid:
+            st.markdown("#### 🗂️ Case handling")
+            info = case[cid]
+            with st.form(f"case-{cid}", border=True):
+                c1, c2, c3 = st.columns(3)
+                new_status = c1.selectbox("Status", db.STATUSES, index=db.STATUSES.index(info["status"]))
+                disp_opts = ["-"] + db.DISPOSITIONS
+                new_disp = c2.selectbox("Disposition (required to close)", disp_opts,
+                                        index=disp_opts.index(info["disposition"]) if info["disposition"] else 0)
+                new_owner = c3.text_input("Assignee", info["assignee"] or "")
+                note = st.text_area("Analyst note", placeholder="What did you check? What did you find? Next step?")
+                if st.form_submit_button("Save case update", type="primary"):
+                    try:
+                        if new_owner and new_owner != (info["assignee"] or ""):
+                            db.assign(cid, new_owner, analyst)
+                        if new_status != info["status"] or note.strip() or (
+                                new_status == "Closed" and new_disp != (info["disposition"] or "-")):
+                            db.update_status(cid, new_status, analyst, None if new_disp == "-" else new_disp,
+                                             note.strip() or None)
+                        st.rerun()
+                    except ValueError as err:
+                        st.error(str(err))
+            with st.expander("Activity timeline", expanded=True):
+                for ev in reversed(db.get_activity(cid)):
+                    icon = {"created": "🆕", "status": "🔁", "assign": "👤", "note": "📝"}.get(ev["action"], "•")
+                    st.markdown(f"{icon} `{ev['created_at']} UTC` **{html.escape(ev['author'])}**: "
+                                f"{html.escape(ev['detail'])}")
+
+# ---------- Case queue ----------
+with tab_cases:
+    m = db.case_metrics()
+    q = st.columns(5)
+    kpi(q[0], "Open cases", m["open"], "New + In Progress + Escalated", "#3b82f6")
+    kpi(q[1], "Escalated", m["by_status"]["Escalated"], "handed to L2 / IR", SEV_COLORS["High"])
+    kpi(q[2], "MTTA", "-" if m["mtta_minutes"] is None else f"{m['mtta_minutes']} min", "mean time to acknowledge", "#8b5cf6")
+    kpi(q[3], "MTTR", "-" if m["mttr_minutes"] is None else f"{m['mttr_minutes']} min", "mean time to resolve", "#0ea5e9")
+    kpi(q[4], "False-positive rate", "-" if m["false_positive_rate_pct"] is None else f"{m['false_positive_rate_pct']}%",
+        f"of {m['closed']} closed alerts", SEV_COLORS["Medium"])
+    st.write("")
+    left, right = st.columns([3, 2])
+    with left:
+        st.markdown("##### Alert queue (all uploads)")
+        status_filter = st.multiselect("Show statuses", db.STATUSES, default=["New", "In Progress", "Escalated"])
+        rows = [r for r in db.list_alerts() if r["status"] in status_filter]
+        if rows:
+            st.dataframe(pd.DataFrame(rows)[["id", "status", "severity", "risk_score", "rule", "source_ip", "host",
+                                             "assignee", "disposition", "created_at"]],
+                         width="stretch", hide_index=True, height=420)
+        else:
+            st.info("No alerts with these statuses.")
+    with right:
+        st.markdown("##### False positives by rule")
+        if m["fp_rate_by_rule"]:
+            fp = pd.DataFrame(m["fp_rate_by_rule"]).sort_values("fp_rate_pct")
+            fig = go.Figure(go.Bar(x=fp["fp_rate_pct"], y=fp["rule"], orientation="h", marker_color="#eab308",
+                                   text=[f"{r.false_positives}/{r.closed}" for r in fp.itertuples()], textposition="auto"))
+            fig.update_layout(title="Rules with high FP rates need tuning")
+            fig.update_xaxes(title="% of closed alerts", range=[0, 100])
+            st.plotly_chart(styled(fig, 360), width="stretch")
+        else:
+            st.info("Close some alerts with a disposition to see which rules need tuning.")
 
 # ---------- Report ----------
 with tab_report:
