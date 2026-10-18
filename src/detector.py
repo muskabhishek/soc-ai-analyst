@@ -7,6 +7,9 @@ CONFIG = {
     "success_after_failures": {"min_failures": 5, "window_min": 10},
     "invalid_user_probing": {"min_events": 5, "window_min": 10},
     "odd_hour_login": {"start_hour": 0, "end_hour": 5},
+    "admin_group_add": {"groups": ["administrators", "domain admins", "enterprise admins", "schema admins"]},
+    "suspicious_powershell": {"pattern": r"(?i)powershell.*(?:\s-e(?:nc|ncodedcommand)?\s|\s-w(?:indowstyle)?\s+hidden|"
+                                         r"iex\b|invoke-expression|downloadstring|frombase64string)"},
 }
 MAX_EVIDENCE = 50
 
@@ -96,6 +99,28 @@ def detect(df, config=None):
         sub["timestamp"] = pd.to_datetime(sub["timestamp"])
         alerts.append(_make("odd_hour_login", r["source_ip"], sub,
             f"Successful login for '{r['user']}' at {r['timestamp']:%H:%M} (outside normal hours) from {r['source_ip']}.", count=1))
+
+    # 6-10. Windows host events: each matching event is an alert on its own
+    def per_event(rows, rule, desc):
+        for _, r in rows.iterrows():
+            sub = r.to_frame().T
+            sub["timestamp"] = pd.to_datetime(sub["timestamp"])
+            alerts.append(_make(rule, r["source_ip"], sub, desc(r), count=1))
+
+    if "target_user" in df:
+        et = df["event_type"]
+        per_event(df[et == "user_created"], "new_account_created",
+                  lambda r: f"New account '{r['target_user']}' created by '{r['user']}' on {r['host']}.")
+        groups = set(cfg["admin_group_add"]["groups"])
+        per_event(df[(et == "group_add") & df["detail"].str.lower().isin(groups)], "admin_group_add",
+                  lambda r: f"'{r['target_user']}' added to privileged group '{r['detail']}' by '{r['user']}' on {r['host']}.")
+        per_event(df[et == "lockout"], "account_lockout",
+                  lambda r: f"Account '{r['target_user'] or r['user']}' locked out on {r['host']} after repeated failed logons.")
+        per_event(df[(et == "process") & df["detail"].str.contains(cfg["suspicious_powershell"]["pattern"], regex=True)],
+                  "suspicious_powershell",
+                  lambda r: f"Suspicious PowerShell run by '{r['user']}' on {r['host']}: {r['detail'][:120]}")
+        per_event(df[et == "log_cleared"], "audit_log_cleared",
+                  lambda r: f"Security audit log cleared by '{r['user']}' on {r['host']} - possible cover-up of activity.")
 
     # Deduplicate: a success_after_failures alert supersedes nothing, but drop exact duplicates
     seen, uniq = set(), []

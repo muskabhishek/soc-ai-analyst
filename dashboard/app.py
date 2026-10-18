@@ -138,8 +138,8 @@ with tab_overview:
     left, right = st.columns([2, 1])
     t = df.assign(bucket=df["timestamp"].dt.floor("15min"))
     t = t.groupby(["bucket", "status"]).size().reset_index(name="events")
-    fig = px.bar(t, x="bucket", y="events", color="status", title="Login activity over time (15-minute buckets)",
-                 color_discrete_map={"failure": "#ef4444", "success": "#334155"},
+    fig = px.bar(t, x="bucket", y="events", color="status", title="Activity over time (15-minute buckets)",
+                 color_discrete_map={"failure": "#ef4444", "success": "#334155", "info": "#8b5cf6"},
                  labels={"bucket": "", "events": "events", "status": ""})
     left.plotly_chart(styled(fig), width="stretch")
 

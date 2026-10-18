@@ -61,6 +61,19 @@ REMEDIATION = {
     "invalid_user_probing": ["Block the source IP", "Disable unused default accounts", "Monitor for follow-up attempts"],
     "odd_hour_login": ["Confirm with the user whether the login was legitimate",
                        "If not, disable the account and reset credentials", "Restrict SSH by IP allow-list / VPN"],
+    "new_account_created": ["Confirm the account was created through an approved change request",
+                            "If not, disable the new account and investigate the creator's session"],
+    "admin_group_add": ["Verify the change with the account owner and IT change records",
+                        "If unauthorised, remove the member from the group and reset its credentials",
+                        "Review what the account did with admin rights"],
+    "account_lockout": ["Check the failed logons that caused the lockout and their source",
+                        "Contact the user before unlocking", "Block the source if it is external"],
+    "suspicious_powershell": ["Decode the command line and identify what it downloads or runs",
+                              "Isolate the host if the payload is malicious",
+                              "Enable PowerShell script block logging (Event ID 4104)"],
+    "audit_log_cleared": ["Treat as a high-priority incident: logs are cleared to hide activity",
+                          "Collect remaining evidence (SIEM copies, other hosts) and isolate the host",
+                          "Restrict who holds the 'Manage auditing and security log' right"],
 }
 
 

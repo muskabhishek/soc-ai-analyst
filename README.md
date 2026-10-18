@@ -26,6 +26,11 @@ Logs (Linux auth.log / Windows CSV)
 | Success after failures | login succeeds after >=5 failures from same IP | T1078 |
 | Invalid user probing | >=5 non-existent usernames from one IP | T1087.001 |
 | Odd-hour login | successful login 00:00-05:00 | T1078 |
+| New account created | Windows 4720 | T1136.001 |
+| Added to privileged group | Windows 4732 into Administrators / Domain Admins / Enterprise Admins / Schema Admins | T1098 |
+| Account lockout | Windows 4740 | T1110 |
+| Suspicious PowerShell | Windows 4688 command line with `-enc`, `-w hidden`, `IEX`, `DownloadString`, `FromBase64String` | T1059.001 |
+| Audit log cleared | Windows 1102 | T1070.001 |
 
 Thresholds live in `CONFIG` at the top of `src/detector.py`.
 
@@ -33,7 +38,7 @@ Thresholds live in `CONFIG` at the top of `src/detector.py`.
 ```bash
 pip install -r requirements.txt
 python -m src.generator                 # create sample logs with hidden attacks
-python -m pytest -q tests               # 7 tests: every injected attack found, no false positives
+python -m pytest -q tests               # every injected attack found, no false positives
 
 # optional: real LLM explanations
 ollama serve & ollama pull llama3.2
@@ -56,7 +61,12 @@ Env vars: `OLLAMA_URL` (default `http://localhost:11434`), `OLLAMA_MODEL` (defau
 
 ## Supported log formats
 - Linux SSH `auth.log` (Failed password / Accepted password / Invalid user)
-- Windows Security CSV: `timestamp,host,event_id,user,ip` (4624 success, 4625 failure)
+- Windows Security CSV: `timestamp,host,event_id,user,ip[,target_user,group,command_line]`
+  - Event IDs: 4624 logon success, 4625 logon failure, 4720 account created, 4732 added to group,
+    4740 account locked out, 4688 process created, 1102 audit log cleared
+  - The sample Windows log hides a full attack chain: RDP brute force -> lockout -> break-in -> new account ->
+    added to Administrators -> encoded PowerShell -> audit log cleared. Benign PowerShell and non-admin group
+    changes are included to prove they do **not** alert.
 
 Adding a format = one new function in `src/parser.py` returning the common schema.
 

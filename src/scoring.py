@@ -2,7 +2,8 @@
 import ipaddress
 
 BASE = {"brute_force": 40, "password_spraying": 45, "success_after_failures": 65,
-        "invalid_user_probing": 25, "odd_hour_login": 35}
+        "invalid_user_probing": 25, "odd_hour_login": 35, "new_account_created": 40, "admin_group_add": 60,
+        "account_lockout": 30, "suspicious_powershell": 55, "audit_log_cleared": 70}
 
 
 _INTERNAL = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8")]

@@ -1,4 +1,6 @@
 """Step 2 - Generate realistic sample logs (Linux auth.log + Windows events) with injected attacks."""
+import csv
+import io
 import random
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -56,20 +58,52 @@ def generate_linux_log(seed=42):
     return [l for _, l in lines], truth
 
 
+WIN_HEADER = "timestamp,host,event_id,user,ip,target_user,group,command_line"
+BENIGN_PROCESSES = [
+    r"C:\Windows\System32\svchost.exe -k netsvcs",
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"powershell.exe -File C:\Scripts\backup.ps1",
+    r"powershell.exe Get-Service",
+    r"C:\Windows\System32\notepad.exe",
+]
+
+
+def _win_row(ts, host, eid, user, ip, target="", group="", cmd=""):
+    buf = io.StringIO()
+    csv.writer(buf, lineterminator="").writerow([f"{ts:%Y-%m-%d %H:%M:%S}", host, eid, user, ip, target, group, cmd])
+    return ts, buf.getvalue()
+
+
 def generate_windows_log(seed=7):
-    """CSV-style Windows Security events: timestamp,host,event_id,user,ip"""
+    """CSV-style Windows Security events (see WIN_HEADER) with a full attack chain hidden in normal activity."""
     random.seed(seed)
     host, rows = "WIN-DC01", []
-    for _ in range(60):
+    for _ in range(60):  # normal logons
         ts = BASE + timedelta(minutes=random.randint(0, 600))
         eid = 4624 if random.random() > 0.1 else 4625
-        rows.append((ts, f"{ts:%Y-%m-%d %H:%M:%S},{host},{eid},{random.choice(USERS)},{random.choice(NORMAL_IPS)}"))
-    t0 = BASE + timedelta(hours=4)
-    for i in range(25):  # RDP brute force
-        ts = t0 + timedelta(seconds=i * 8)
-        rows.append((ts, f"{ts:%Y-%m-%d %H:%M:%S},{host},4625,administrator,185.220.101.4"))
+        rows.append(_win_row(ts, host, eid, random.choice(USERS), random.choice(NORMAL_IPS)))
+    for _ in range(20):  # normal process starts, incl. harmless PowerShell that must NOT alert
+        ts = BASE + timedelta(minutes=random.randint(0, 600))
+        rows.append(_win_row(ts, host, 4688, random.choice(USERS), random.choice(NORMAL_IPS),
+                             cmd=random.choice(BENIGN_PROCESSES)))
+    # benign: helpdesk adds a user to a non-privileged group (must NOT alert)
+    rows.append(_win_row(BASE + timedelta(hours=1), host, 4732, "helpdesk", "192.168.1.10", "carol", "Print Operators"))
+
+    # ATTACK CHAIN from 185.220.101.4: RDP brute force -> lockout -> break-in -> persistence -> execution -> cover-up
+    ip, t0 = "185.220.101.4", BASE + timedelta(hours=4)
+    for i in range(25):
+        rows.append(_win_row(t0 + timedelta(seconds=i * 8), host, 4625, "administrator", ip))
+    rows.append(_win_row(t0 + timedelta(seconds=205), host, 4740, "administrator", ip, target="administrator"))
+    rows.append(_win_row(t0 + timedelta(seconds=260), host, 4624, "administrator", ip))
+    rows.append(_win_row(t0 + timedelta(minutes=6), host, 4720, "administrator", ip, target="svc_update"))
+    rows.append(_win_row(t0 + timedelta(minutes=7), host, 4732, "administrator", ip, "svc_update", "Administrators"))
+    rows.append(_win_row(t0 + timedelta(minutes=9), host, 4688, "administrator", ip,
+                         cmd="powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAKQA="))
+    rows.append(_win_row(t0 + timedelta(minutes=12), host, 1102, "administrator", ip))
     rows.sort(key=lambda x: x[0])
-    return ["timestamp,host,event_id,user,ip"] + [r for _, r in rows], {"brute_force": "185.220.101.4"}
+    truth = {"brute_force": ip, "account_lockout": ip, "success_after_failures": ip, "new_account_created": ip,
+             "admin_group_add": ip, "suspicious_powershell": ip, "audit_log_cleared": ip}
+    return [WIN_HEADER] + [r for _, r in rows], truth
 
 
 def write_samples(out_dir="data/sample_logs"):
