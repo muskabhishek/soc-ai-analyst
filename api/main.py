@@ -1,0 +1,64 @@
+"""Step 8b - FastAPI backend.  Run:  uvicorn api.main:app --reload   (docs at /docs)"""
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from src import db
+from src.llm import explain_alert, ollama_available, incident_report
+from src.pipeline import analyze_text
+
+app = FastAPI(title="AI SOC Analyst", version="1.0")
+db.init_db()
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "ollama": ollama_available()}
+
+
+@app.post("/upload-logs")
+async def upload_logs(file: UploadFile = File(...)):
+    text = (await file.read()).decode("utf-8", errors="ignore")
+    df, alerts = analyze_text(text)
+    if df.empty:
+        raise HTTPException(400, "No parsable log events found (supported: Linux SSH auth.log, Windows security CSV).")
+    upload_id, ids = db.save_analysis(file.filename, df, alerts)
+    return {"upload_id": upload_id, "events": len(df), "alerts": db.list_alerts(upload_id)}
+
+
+@app.get("/alerts")
+def alerts(upload_id: int | None = None):
+    return db.list_alerts(upload_id)
+
+
+@app.get("/alerts/{alert_id}")
+def alert_detail(alert_id: int):
+    a = db.get_alert(alert_id)
+    if not a:
+        raise HTTPException(404, "Alert not found")
+    return a
+
+
+@app.post("/alerts/{alert_id}/explain")
+def explain(alert_id: int, use_llm: bool = True, model: str | None = None):
+    a = db.get_alert(alert_id)
+    if not a:
+        raise HTTPException(404, "Alert not found")
+    ex = explain_alert(a, use_llm=use_llm, model=model)
+    db.save_report(alert_id, ex["text"], ex["source"], ex["warnings"])
+    return ex
+
+
+@app.get("/stats")
+def stats():
+    return db.stats()
+
+
+@app.get("/report/{upload_id}")
+def report(upload_id: int):
+    rows = db.list_alerts(upload_id)
+    if not rows:
+        raise HTTPException(404, "No alerts for this upload")
+    full = [db.get_alert(r["id"]) for r in rows]
+    exps = {}
+    for i, a in enumerate(full, 1):
+        a["alert_id"] = i
+        exps[i] = a["report"] or explain_alert(a, use_llm=False)
+    return {"markdown": incident_report(full, exps)}
