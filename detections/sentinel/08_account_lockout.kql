@@ -1,0 +1,8 @@
+// Rule: Account lockout | MITRE T1110 Brute Force | Python rule: account_lockout
+// For 4740, TargetDomainName holds the CALLER computer the failed logons came from.
+SecurityEvent
+| where EventID == 4740
+| summarize Lockouts = count(), LockedAccounts = make_set(TargetUserName, 50),
+            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+    by Computer, CallerComputer = TargetDomainName
+| order by Lockouts desc

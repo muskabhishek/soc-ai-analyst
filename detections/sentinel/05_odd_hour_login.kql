@@ -1,0 +1,8 @@
+// Rule: Odd-hour login | MITRE T1078 Valid Accounts | Python rule: odd_hour_login
+// Logic: successful logon between 00:00 and 05:00. TimeGenerated is UTC: shift it to the site's local time.
+let utc_offset = 5h + 30m;    // example: India Standard Time
+SecurityEvent
+| where EventID == 4624 and LogonType in (2, 10)    // interactive and RDP logons by people
+| extend LocalHour = hourofday(TimeGenerated + utc_offset)
+| where LocalHour >= 0 and LocalHour < 5
+| project TimeGenerated, Computer, TargetUserName, IpAddress, LocalHour

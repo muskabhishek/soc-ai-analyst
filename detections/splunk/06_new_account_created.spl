@@ -1,0 +1,5 @@
+```Rule: New account created | MITRE T1136.001 Create Account: Local Account | Python rule: new_account_created```
+```Logic: any Event ID 4720. In production, suppress accounts created by the approved provisioning service.```
+index=wineventlog EventCode=4720
+| table _time host src_user user
+| rename src_user AS created_by, user AS new_account

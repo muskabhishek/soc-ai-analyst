@@ -1,0 +1,6 @@
+```Rule: Suspicious PowerShell | MITRE T1059.001 | Python rule: suspicious_powershell```
+```Logic: Event ID 4688 process creation (needs "Include command line in process creation events" enabled) where the```
+```PowerShell command line is encoded, hidden, or downloads and runs code```
+index=wineventlog EventCode=4688 New_Process_Name="*\powershell.exe"
+| regex Process_Command_Line="(?i)(\s-e(nc|ncodedcommand)?\s|\s-w(indowstyle)?\s+hidden|iex\b|invoke-expression|downloadstring|frombase64string)"
+| table _time host user Process_Command_Line

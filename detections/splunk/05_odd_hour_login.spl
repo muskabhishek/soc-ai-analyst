@@ -1,0 +1,7 @@
+```Rule: Odd-hour login | MITRE T1078 Valid Accounts | Python rule: odd_hour_login```
+```Logic: successful login between 00:00 and 05:00 (tune the hours to the business; use the host's local time zone)```
+index=linux sourcetype=linux_secure "Accepted"
+| rex "Accepted \w+ for (?<user>\S+) from (?<src_ip>\d{1,3}(\.\d{1,3}){3})"
+| eval hour=tonumber(strftime(_time, "%H"))
+| where hour >= 0 AND hour < 5
+| table _time host user src_ip

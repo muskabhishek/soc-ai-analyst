@@ -1,0 +1,17 @@
+```Rule: Success after failures | MITRE T1078 Valid Accounts | Python rule: success_after_failures```
+```Logic: a successful login from an IP that had >= 5 failed logins in the previous 10 minutes = likely compromised account```
+
+```--- Linux SSH ---```
+index=linux sourcetype=linux_secure ("Failed password" OR "Accepted")
+| rex "(?<action>Failed|Accepted) \w+ for (invalid user )?(?<user>\S+) from (?<src_ip>\d{1,3}(\.\d{1,3}){3})"
+| sort 0 _time
+| streamstats time_window=10m count(eval(action="Failed")) AS recent_failures BY src_ip
+| where action="Accepted" AND recent_failures >= 5
+| table _time host src_ip user recent_failures
+
+```--- Windows (4625 failures then 4624 success) ---```
+index=wineventlog (EventCode=4625 OR EventCode=4624)
+| sort 0 _time
+| streamstats time_window=10m count(eval(EventCode=4625)) AS recent_failures BY src_ip
+| where EventCode=4624 AND recent_failures >= 5
+| table _time host src_ip user recent_failures

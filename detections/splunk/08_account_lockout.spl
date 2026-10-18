@@ -1,0 +1,5 @@
+```Rule: Account lockout | MITRE T1110 Brute Force | Python rule: account_lockout```
+```Logic: any Event ID 4740; several lockouts in a short time from one caller = active brute force```
+index=wineventlog EventCode=4740
+| stats count AS lockouts values(user) AS locked_accounts min(_time) AS first_seen max(_time) AS last_seen BY host Caller_Computer_Name
+| convert ctime(first_seen) ctime(last_seen)

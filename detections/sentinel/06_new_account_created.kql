@@ -1,0 +1,4 @@
+// Rule: New account created | MITRE T1136.001 Create Account: Local Account | Python rule: new_account_created
+SecurityEvent
+| where EventID == 4720
+| project TimeGenerated, Computer, CreatedBy = SubjectUserName, NewAccount = TargetUserName

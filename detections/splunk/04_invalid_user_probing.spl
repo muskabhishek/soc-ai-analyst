@@ -1,0 +1,8 @@
+```Rule: Invalid user probing (account enumeration) | MITRE T1087.001 | Python rule: invalid_user_probing```
+```Logic: >= 5 attempts with usernames that do not exist, from one IP, inside 10 minutes```
+index=linux sourcetype=linux_secure "Invalid user"
+| rex "Invalid user (?<user>\S+) from (?<src_ip>\d{1,3}(\.\d{1,3}){3})"
+| sort 0 _time
+| streamstats time_window=10m count AS attempts_10m BY src_ip
+| where attempts_10m >= 5
+| stats max(attempts_10m) AS attempts values(user) AS usernames_tried BY src_ip host

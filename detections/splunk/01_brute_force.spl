@@ -1,0 +1,20 @@
+```Rule: Brute force | MITRE T1110.001 Password Guessing | Python rule: brute_force```
+```Logic: >= 10 failed logins from one source IP inside any 5-minute sliding window```
+
+```--- Linux SSH (auth.log / linux_secure) ---```
+index=linux sourcetype=linux_secure "Failed password"
+| rex "Failed password for (invalid user )?(?<user>\S+) from (?<src_ip>\d{1,3}(\.\d{1,3}){3})"
+| sort 0 _time
+| streamstats time_window=5m count AS failures_5m BY src_ip
+| where failures_5m >= 10
+| stats max(failures_5m) AS peak_failures dc(user) AS users_targeted values(user) AS users
+        min(_time) AS first_seen max(_time) AS last_seen BY src_ip host
+| convert ctime(first_seen) ctime(last_seen)
+
+```--- Windows Security (Event ID 4625) ---```
+index=wineventlog EventCode=4625
+| sort 0 _time
+| streamstats time_window=5m count AS failures_5m BY src_ip
+| where failures_5m >= 10
+| stats max(failures_5m) AS peak_failures values(user) AS users min(_time) AS first_seen max(_time) AS last_seen BY src_ip host
+| convert ctime(first_seen) ctime(last_seen)

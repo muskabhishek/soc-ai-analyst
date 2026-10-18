@@ -1,0 +1,6 @@
+```Rule: Member added to a privileged group | MITRE T1098 Account Manipulation | Python rule: admin_group_add```
+```Logic: Event ID 4732 (local group) or 4728/4756 (domain global/universal group) where the group is privileged```
+index=wineventlog (EventCode=4732 OR EventCode=4728 OR EventCode=4756)
+    Group_Name IN ("Administrators", "Domain Admins", "Enterprise Admins", "Schema Admins")
+| table _time host src_user user Group_Name
+| rename src_user AS changed_by, user AS member_added

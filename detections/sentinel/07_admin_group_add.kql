@@ -1,0 +1,7 @@
+// Rule: Member added to a privileged group | MITRE T1098 Account Manipulation | Python rule: admin_group_add
+// 4732 = local group, 4728 = domain global group, 4756 = universal group. TargetUserName holds the GROUP name.
+let privileged = dynamic(["Administrators", "Domain Admins", "Enterprise Admins", "Schema Admins"]);
+SecurityEvent
+| where EventID in (4732, 4728, 4756)
+| where TargetUserName in~ (privileged)
+| project TimeGenerated, Computer, ChangedBy = SubjectUserName, MemberAdded = MemberName, Group = TargetUserName

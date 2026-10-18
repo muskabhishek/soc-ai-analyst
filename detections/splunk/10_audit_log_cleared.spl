@@ -1,0 +1,4 @@
+```Rule: Audit log cleared | MITRE T1070.001 Clear Windows Event Logs | Python rule: audit_log_cleared```
+```Logic: Event ID 1102 (Security log cleared) or System log Event ID 104 (any other log cleared). Almost never benign.```
+index=wineventlog (EventCode=1102 OR (EventCode=104 AND source="WinEventLog:System"))
+| table _time host user EventCode

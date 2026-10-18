@@ -1,0 +1,14 @@
+// Rule: Success after failures | MITRE T1078 Valid Accounts | Python rule: success_after_failures
+// Logic: a successful logon (4624) from an IP with >= 5 failed logons (4625) in the 10 minutes before it.
+let lookback = 10m;
+let min_failures = 5;
+let Failures = SecurityEvent
+    | where EventID == 4625
+    | project FailTime = TimeGenerated, IpAddress;
+SecurityEvent
+| where EventID == 4624 and LogonType in (3, 10)      // network and RemoteInteractive (RDP) logons
+| project SuccessTime = TimeGenerated, IpAddress, TargetUserName, Computer
+| join kind=inner Failures on IpAddress
+| where FailTime between ((SuccessTime - lookback) .. SuccessTime)
+| summarize PriorFailures = count() by SuccessTime, IpAddress, TargetUserName, Computer
+| where PriorFailures >= min_failures

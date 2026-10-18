@@ -1,0 +1,21 @@
+// Rule: Brute force | MITRE T1110.001 Password Guessing | Python rule: brute_force
+// Logic: >= 10 failed logins from one source IP in 5 minutes.
+// Note: bin() uses fixed 5-minute buckets; the Python engine uses a true sliding window.
+let window = 5m;
+let threshold = 10;
+// --- Windows Security (Event ID 4625) ---
+SecurityEvent
+| where EventID == 4625
+| summarize Failures = count(), Users = make_set(TargetUserName, 20),
+            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+    by IpAddress, Computer, bin(TimeGenerated, window)
+| where Failures >= threshold
+| order by Failures desc
+
+// --- Linux SSH via Syslog (run separately) ---
+// Syslog
+// | where ProcessName == "sshd" and SyslogMessage has "Failed password"
+// | extend User = extract(@"Failed password for (?:invalid user )?(\S+)", 1, SyslogMessage),
+//          SrcIp = extract(@"from (\d{1,3}(?:\.\d{1,3}){3})", 1, SyslogMessage)
+// | summarize Failures = count(), Users = make_set(User, 20) by SrcIp, Computer, bin(TimeGenerated, 5m)
+// | where Failures >= 10

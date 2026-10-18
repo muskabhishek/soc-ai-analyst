@@ -1,0 +1,6 @@
+// Rule: Suspicious PowerShell | MITRE T1059.001 | Python rule: suspicious_powershell
+// Needs process command-line auditing enabled for Event ID 4688.
+SecurityEvent
+| where EventID == 4688 and NewProcessName endswith @"\powershell.exe"
+| where CommandLine matches regex @"(?i)(\s-e(nc|ncodedcommand)?\s|\s-w(indowstyle)?\s+hidden|iex\b|invoke-expression|downloadstring|frombase64string)"
+| project TimeGenerated, Computer, SubjectUserName, CommandLine
