@@ -5,8 +5,8 @@ from .mitre import map_alerts
 from .scoring import score_alerts
 
 
-def analyze_text(text):
-    df = parse_text(text)
+def analyze_text(text, year=2026):
+    df = parse_text(text, year)
     alerts = score_alerts(map_alerts(detect(df)))
     for i, a in enumerate(alerts, 1):
         a["alert_id"] = i

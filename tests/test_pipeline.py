@@ -152,3 +152,15 @@ def test_case_api(monkeypatch, tmp_path):
     assert c.get("/metrics").json()["closed"] == 1
     assert c.get("/alerts?status=Closed").json()[0]["id"] == aid
     assert c.patch("/alerts/9999/status", json={"status": "New"}).status_code == 404
+
+
+def test_key_only_ssh_failures_recover_ip_by_pid():
+    log = "\n".join([
+        "Dec  7 05:20:40 srv sshd[100]: Connection from 203.0.113.9 port 4242 on 10.0.0.1 port 22",
+        "Dec  7 05:20:47 srv sshd[100]: Disconnecting: Too many authentication failures for root [preauth]",
+        "Dec  7 05:20:52 srv sshd[200]: Disconnecting: Too many authentication failures for root [preauth]",
+        "Dec  7 05:20:53 srv sshd[300]: Invalid user  from 198.51.100.1",
+    ])
+    df = parse_text(log, year=2014)
+    assert list(df["source_ip"]) == ["203.0.113.9", "unknown", "198.51.100.1"]
+    assert df.iloc[0]["timestamp"].year == 2014 and df.iloc[2]["user"] == "(empty)"

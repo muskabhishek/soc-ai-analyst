@@ -18,6 +18,16 @@ Logs (Linux auth.log / Windows CSV)
    -> db.py         SQLite   <->  api/main.py (FastAPI)  <->  dashboard/app.py (Streamlit)
 ```
 
+## Tested on real attack data
+The pipeline was also run on a **real** SSH log from an internet-facing AWS server (SecRepo, 86,839 lines,
+Dec 2014): **14,825 attack events parsed in about 10 s, 236 alerts, 0 internal IPs alerted, and 2 root brute-force
+bursts found**, including events whose source IP had to be recovered from another line of the same sshd process.
+Full write-up: [docs/real-data-results.md](docs/real-data-results.md). Reproduce: `python scripts/real_data_benchmark.py`.
+
+## SIEM-ready detections
+Every rule is also written as a **Splunk SPL** and **Microsoft Sentinel KQL** query in [detections/](detections/),
+with the same thresholds and MITRE IDs.
+
 ## Detection rules
 | Rule | Logic | MITRE |
 |---|---|---|
@@ -38,7 +48,8 @@ Thresholds live in `CONFIG` at the top of `src/detector.py`.
 ```bash
 pip install -r requirements.txt
 python -m src.generator                 # create sample logs with hidden attacks
-python -m pytest -q tests               # every injected attack found, no false positives
+python -m pytest -q tests               # 12 tests: every injected attack found, no false positives
+python scripts/real_data_benchmark.py   # optional: run on a real public SSH log
 
 # optional: real LLM explanations
 ollama serve & ollama pull llama3.2
@@ -73,7 +84,7 @@ The **Case queue** tab tracks the KPIs a SOC manager reports:
 - **False-positive rate**, overall and **per rule**, which shows which detections need tuning
 
 ## Supported log formats
-- Linux SSH `auth.log` (Failed password / Accepted password / Invalid user)
+- Linux SSH `auth.log` (Failed password / Accepted password / Invalid user / Too many authentication failures)
 - Windows Security CSV: `timestamp,host,event_id,user,ip[,target_user,group,command_line]`
   - Event IDs: 4624 logon success, 4625 logon failure, 4720 account created, 4732 added to group,
     4740 account locked out, 4688 process created, 1102 audit log cleared
