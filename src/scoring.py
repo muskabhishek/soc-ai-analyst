@@ -3,7 +3,11 @@ import ipaddress
 
 BASE = {"brute_force": 40, "password_spraying": 45, "success_after_failures": 65,
         "invalid_user_probing": 25, "odd_hour_login": 35, "new_account_created": 40, "admin_group_add": 60,
-        "account_lockout": 30, "suspicious_powershell": 55, "audit_log_cleared": 70}
+        "account_lockout": 30, "suspicious_powershell": 55, "audit_log_cleared": 70,
+        "port_scan": 35, "net_brute_force": 45, "cleartext_credentials": 50, "suspicious_dns": 55,
+        "beaconing": 60, "suspicious_download": 55, "suspicious_port": 50}
+# for outbound rules the internal source is the VICTIM; what matters is whether the other side is on the internet
+OUTBOUND_RULES = {"beaconing", "suspicious_download", "suspicious_port", "cleartext_credentials"}
 
 
 _INTERNAL = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8")]
@@ -30,7 +34,8 @@ def score_alerts(alerts):
         s += min(a["count"] / 2, 20)                       # volume of attempts
         if len(rules_per_ip[a["source_ip"]]) >= 2:
             s += 15                                        # correlated behaviour from same IP
-        if not _is_private(a["source_ip"]):
+        context_ip = a.get("peer_ip") if a["rule"] in OUTBOUND_RULES and a.get("peer_ip") else a["source_ip"]
+        if not _is_private(context_ip):
             s += 10                                        # external source
         else:
             s -= 10

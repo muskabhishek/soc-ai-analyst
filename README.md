@@ -18,6 +18,25 @@ Logs (Linux auth.log / Windows CSV)
    -> db.py         SQLite   <->  api/main.py (FastAPI)  <->  dashboard/app.py (Streamlit)
 ```
 
+## Network traffic analysis (Wireshark PCAP)
+Upload a `.pcap` / `.pcapng` capture (what Wireshark saves) and the same pipeline runs on packets:
+`pcap_parser.py` (Scapy) turns packets into rows with addresses, ports, TCP flags, DNS queries, HTTP requests and
+cleartext credentials, and `net_detector.py` applies 7 network rules. **Every alert includes a Wireshark display
+filter**: paste it into Wireshark's filter bar to jump to the evidence packets.
+
+| Rule | Logic | MITRE |
+|---|---|---|
+| Port scan | one source sends SYNs to >=20 ports on one host in 60 s | T1046 |
+| Network brute force | >=15 new connections to SSH/RDP/FTP/Telnet/VNC from one source in 60 s | T1110 |
+| Cleartext credentials | FTP `USER`/`PASS` or HTTP Basic auth on the wire (passwords are masked at parse time) | T1040 |
+| Suspicious DNS | >=5 queries with a label of 30+ chars or a high-entropy (random-looking) label | T1071.004 |
+| Beaconing | >=6 connections to the same server with near-constant intervals (jitter <= 10%) | T1071.001 |
+| Suspicious download | `.exe` / `.dll` / `.ps1` / `.hta` ... fetched over plain HTTP | T1105 |
+| Suspicious port | connections to 4444, 1337, 31337, 6667, 5555 | T1571 |
+
+`python -m src.generator` also writes `data/sample_logs/capture.pcap` with all 7 attacks hidden in normal browsing
+traffic. Packets are only written to a file, never sent.
+
 ## Tested on real attack data
 The pipeline was also run on a **real** SSH log from an internet-facing AWS server (SecRepo, 86,839 lines,
 Dec 2014): **14,825 attack events parsed in about 10 s, 236 alerts, 0 internal IPs alerted, and 2 root brute-force
@@ -48,7 +67,7 @@ Thresholds live in `CONFIG` at the top of `src/detector.py`.
 ```bash
 pip install -r requirements.txt
 python -m src.generator                 # create sample logs with hidden attacks
-python -m pytest -q tests               # 12 tests: every injected attack found, no false positives
+python -m pytest -q tests               # every injected attack found, no false positives
 python scripts/real_data_benchmark.py   # optional: run on a real public SSH log
 
 # optional: real LLM explanations
@@ -84,6 +103,7 @@ The **Case queue** tab tracks the KPIs a SOC manager reports:
 - **False-positive rate**, overall and **per rule**, which shows which detections need tuning
 
 ## Supported log formats
+- Packet captures: `.pcap` / `.pcapng` (Wireshark, tcpdump), detected automatically by file signature
 - Linux SSH `auth.log` (Failed password / Accepted password / Invalid user / Too many authentication failures)
 - Windows Security CSV: `timestamp,host,event_id,user,ip[,target_user,group,command_line]`
   - Event IDs: 4624 logon success, 4625 logon failure, 4720 account created, 4732 added to group,

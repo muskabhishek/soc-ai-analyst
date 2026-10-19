@@ -5,6 +5,7 @@ streamlit>=1.50
 plotly
 requests
 python-multipart
+scapy
 # tests
 pytest
 httpx

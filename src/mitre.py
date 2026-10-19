@@ -10,6 +10,14 @@ MITRE_MAP = {
     "account_lockout": {"id": "T1110", "name": "Brute Force", "tactic": "Credential Access"},
     "suspicious_powershell": {"id": "T1059.001", "name": "Command and Scripting Interpreter: PowerShell", "tactic": "Execution"},
     "audit_log_cleared": {"id": "T1070.001", "name": "Indicator Removal: Clear Windows Event Logs", "tactic": "Defense Evasion"},
+    # network (PCAP) rules
+    "port_scan": {"id": "T1046", "name": "Network Service Discovery", "tactic": "Discovery"},
+    "net_brute_force": {"id": "T1110", "name": "Brute Force", "tactic": "Credential Access"},
+    "cleartext_credentials": {"id": "T1040", "name": "Network Sniffing (credentials exposed in cleartext)", "tactic": "Credential Access"},
+    "suspicious_dns": {"id": "T1071.004", "name": "Application Layer Protocol: DNS", "tactic": "Command and Control / Exfiltration"},
+    "beaconing": {"id": "T1071.001", "name": "Application Layer Protocol: Web Protocols (C2 beaconing)", "tactic": "Command and Control"},
+    "suspicious_download": {"id": "T1105", "name": "Ingress Tool Transfer", "tactic": "Command and Control"},
+    "suspicious_port": {"id": "T1571", "name": "Non-Standard Port", "tactic": "Command and Control"},
 }
 
 

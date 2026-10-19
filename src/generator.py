@@ -1,8 +1,9 @@
 """Step 2 - Generate realistic sample logs (Linux auth.log + Windows events) with injected attacks."""
+import base64
 import csv
 import io
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 USERS = ["alice", "bob", "carol", "dave", "sergio"]
@@ -106,6 +107,94 @@ def generate_windows_log(seed=7):
     return [WIN_HEADER] + [r for _, r in rows], truth
 
 
+def generate_pcap(path, seed=11):
+    """Write a packet capture with normal traffic and hidden network attacks. Returns the ground truth as a set of
+    (rule, source_ip). Packets are only written to a file, never sent. 203.0.113.50 is the same attacker as in
+    auth.log, so the capture and the log can be correlated."""
+    import logging
+    logging.getLogger("scapy").setLevel(logging.ERROR)
+    from scapy.layers.dns import DNS, DNSQR
+    from scapy.layers.inet import IP, TCP, UDP
+    from scapy.layers.l2 import Ether
+    from scapy.utils import wrpcap
+
+    random.seed(seed)
+    t_base = BASE.replace(tzinfo=timezone.utc).timestamp()
+    pkts = []
+
+    def add(t, ip, l4, payload=b""):
+        p = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / ip / l4
+        if payload:
+            p = p / payload
+        p.time = t_base + t
+        pkts.append(p)
+
+    def syn(t, src, dst, dport, sport=None, answer=None):
+        sport = sport or random.randint(40000, 65000)
+        add(t, IP(src=src, dst=dst), TCP(sport=sport, dport=dport, flags="S", seq=1000))
+        if answer:
+            add(t + 0.01, IP(src=dst, dst=src), TCP(sport=dport, dport=sport, flags=answer, seq=5000, ack=1001))
+        return sport
+
+    def tcp_send(t, src, dst, dport, data):
+        sport = syn(t, src, dst, dport, answer="SA")
+        add(t + 0.02, IP(src=src, dst=dst), TCP(sport=sport, dport=dport, flags="A", seq=1001, ack=5001))
+        add(t + 0.03, IP(src=src, dst=dst), TCP(sport=sport, dport=dport, flags="PA", seq=1001, ack=5001), data)
+
+    def dns(t, src, name):
+        add(t, IP(src=src, dst="10.0.0.2"), UDP(sport=random.randint(40000, 65000), dport=53) /
+            DNS(id=random.randint(0, 65535), rd=1, qd=DNSQR(qname=name)))
+
+    clients = ["10.0.0.10", "10.0.0.11", "10.0.0.12", "10.0.0.13", "10.0.0.14"]
+    sites = {"www.google.com": "142.250.72.4", "api.github.com": "140.82.114.6", "outlook.office365.com": "52.97.1.10",
+             "cdn.jsdelivr.net": "151.101.1.229", "www.wikipedia.org": "208.80.154.224"}
+    for _ in range(150):  # normal browsing: DNS lookup, then HTTPS at irregular times
+        t, c, (name, ip) = random.uniform(0, 36000), random.choice(clients), random.choice(list(sites.items()))
+        dns(t, c, name)
+        syn(t + 0.05, c, ip, 443, answer="SA")
+    for _ in range(10):  # normal plain-HTTP page loads
+        tcp_send(random.uniform(0, 36000), random.choice(clients), "93.184.216.34", 80,
+                 b"GET /index.html HTTP/1.1\r\nHost: example.com\r\nUser-Agent: Mozilla/5.0\r\n\r\n")
+    for i in range(3):    # an admin's legitimate SSH sessions
+        syn(1800 + i * 3600, "10.0.0.11", "10.0.0.20", 22, answer="SA")
+
+    truth = set()
+    atk = "203.0.113.50"  # ATTACK 1+2: port scan, then SSH brute force against the server
+    for i, port in enumerate(range(1, 101)):
+        syn(7000 + i * 0.1, atk, "10.0.0.20", port, sport=50000, answer="SA" if port in (22, 80) else "RA")
+    for i in range(40):
+        syn(7100 + i * 3, atk, "10.0.0.20", 22, answer="SA")
+    truth |= {("port_scan", atk), ("net_brute_force", atk)}
+
+    # ATTACK 3: cleartext credentials (FTP login, and HTTP Basic auth to a camera admin page)
+    tcp_send(9000, "10.0.0.15", "203.0.113.80", 21, b"USER bob\r\n")
+    tcp_send(9001, "10.0.0.15", "203.0.113.80", 21, b"PASS Winter2026!\r\n")
+    tcp_send(9500, "10.0.0.16", "198.51.100.80", 80, b"GET /admin HTTP/1.1\r\nHost: camera.example\r\n"
+             b"Authorization: Basic " + base64.b64encode(b"admin:admin123") + b"\r\n\r\n")
+    truth |= {("cleartext_credentials", "10.0.0.15"), ("cleartext_credentials", "10.0.0.16")}
+
+    # ATTACK 4: DNS tunnelling - data hidden in long random subdomains
+    for i in range(15):
+        label = "".join(random.choice("abcdefghijklmnopqrstuvwxyz234567") for _ in range(45))
+        dns(11000 + i * 2, "10.0.0.25", f"{label}.t.exfil-tunnel.example")
+    truth.add(("suspicious_dns", "10.0.0.25"))
+
+    # ATTACK 5: beaconing - an infected host checks in every 60 s (+/- 0.5 s)
+    for i in range(20):
+        syn(13000 + i * 60 + random.uniform(-0.5, 0.5), "10.0.0.30", "185.199.110.9", 443, answer="SA")
+    truth.add(("beaconing", "10.0.0.30"))
+
+    # ATTACK 6+7: executable downloaded over HTTP, then a connection to a Metasploit-style port
+    tcp_send(15000, "10.0.0.31", "203.0.113.99", 80,
+             b"GET /files/invoice.exe HTTP/1.1\r\nHost: cdn-update.example\r\nUser-Agent: Microsoft BITS/7.8\r\n\r\n")
+    syn(15060, "10.0.0.31", "203.0.113.99", 4444, answer="SA")
+    truth |= {("suspicious_download", "10.0.0.31"), ("suspicious_port", "10.0.0.31")}
+
+    pkts.sort(key=lambda p: p.time)
+    wrpcap(str(path), pkts)
+    return truth
+
+
 def write_samples(out_dir="data/sample_logs"):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -113,7 +202,8 @@ def write_samples(out_dir="data/sample_logs"):
     win, t2 = generate_windows_log()
     (out / "auth.log").write_text("\n".join(lin) + "\n")
     (out / "windows_security.csv").write_text("\n".join(win) + "\n")
-    return {"linux": t1, "windows": t2}
+    t3 = generate_pcap(out / "capture.pcap")
+    return {"linux": t1, "windows": t2, "pcap": sorted(t3)}
 
 
 if __name__ == "__main__":

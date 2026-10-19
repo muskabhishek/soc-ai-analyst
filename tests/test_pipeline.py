@@ -164,3 +164,60 @@ def test_key_only_ssh_failures_recover_ip_by_pid():
     df = parse_text(log, year=2014)
     assert list(df["source_ip"]) == ["203.0.113.9", "unknown", "198.51.100.1"]
     assert df.iloc[0]["timestamp"].year == 2014 and df.iloc[2]["user"] == "(empty)"
+
+
+# ---------------- PCAP / network traffic ----------------
+
+def _sample_pcap(tmp_path):
+    from src.generator import generate_pcap
+    path = tmp_path / "capture.pcap"
+    truth = generate_pcap(path)
+    return path.read_bytes(), truth
+
+
+def test_pcap_attacks_detected_exactly(tmp_path):
+    from src.pipeline import analyze_bytes
+    data, truth = _sample_pcap(tmp_path)
+    df, alerts, kind = analyze_bytes(data)
+    assert kind == "pcap" and len(df) > 500
+    assert _rules(alerts) == truth            # every planted attack, nothing from the normal traffic
+    assert all(a["wireshark_filter"] and a["mitre"]["id"].startswith("T1") for a in alerts)
+
+
+def test_pcap_passwords_are_masked(tmp_path):
+    from src.pipeline import analyze_bytes
+    data, _ = _sample_pcap(tmp_path)
+    df, alerts, _ = analyze_bytes(data)
+    everything = df.to_csv() + str(alerts)
+    assert "Winter2026!" not in everything and "admin123" not in everything
+    assert "W***" in everything and "a***" in everything
+
+
+def test_pcap_edge_cases():
+    from src.pipeline import analyze_bytes
+    from src.pcap_parser import parse_pcap
+    assert parse_pcap(b"\xd4\xc3\xb2\xa1" + b"\x00" * 10).empty           # truncated header
+    df, alerts, kind = analyze_bytes(b"not a capture")                     # falls back to log parsing
+    assert kind == "logs" and alerts == []
+
+
+def test_beaconing_needs_regular_intervals():
+    from src.net_detector import detect_network
+    from src.pcap_parser import COLUMNS
+    def frame(times):
+        rows = [dict.fromkeys(COLUMNS, "") | {"timestamp": pd.Timestamp("2026-01-01") + pd.Timedelta(seconds=t),
+                "source_ip": "10.0.0.5", "dst_ip": "198.51.100.9", "src_port": 50000 + i, "dst_port": 443,
+                "proto": "TCP", "flags": "S", "length": 60} for i, t in enumerate(times)]
+        return pd.DataFrame(rows)
+    assert [a["rule"] for a in detect_network(frame([0, 60, 120, 180, 240, 300, 360]))] == ["beaconing"]
+    assert detect_network(frame([0, 15, 200, 230, 900, 905, 2000])) == []
+
+
+def test_api_accepts_pcap(monkeypatch, tmp_path):
+    from src import db
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "p.db"))
+    db.init_db()
+    from api.main import app
+    data, truth = _sample_pcap(tmp_path)
+    r = TestClient(app).post("/upload-logs", files={"file": ("capture.pcap", data)})
+    assert r.status_code == 200 and r.json()["kind"] == "pcap" and len(r.json()["alerts"]) == len(truth)

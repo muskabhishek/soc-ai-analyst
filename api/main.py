@@ -3,7 +3,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from src import db
 from src.llm import explain_alert, ollama_available, incident_report
-from src.pipeline import analyze_text
+from src.pipeline import analyze_bytes
 
 app = FastAPI(title="AI SOC Analyst", version="1.0")
 db.init_db()
@@ -16,12 +16,12 @@ def health():
 
 @app.post("/upload-logs")
 async def upload_logs(file: UploadFile = File(...)):
-    text = (await file.read()).decode("utf-8", errors="ignore")
-    df, alerts = analyze_text(text)
+    df, alerts, kind = analyze_bytes(await file.read())
     if df.empty:
-        raise HTTPException(400, "No parsable log events found (supported: Linux SSH auth.log, Windows security CSV).")
+        raise HTTPException(400, "No parsable events found (supported: Linux SSH auth.log, Windows security CSV, "
+                                 "PCAP/PCAPNG packet captures).")
     upload_id, ids = db.save_analysis(file.filename, df, alerts)
-    return {"upload_id": upload_id, "events": len(df), "alerts": db.list_alerts(upload_id)}
+    return {"upload_id": upload_id, "kind": kind, "events": len(df), "alerts": db.list_alerts(upload_id)}
 
 
 @app.get("/alerts")

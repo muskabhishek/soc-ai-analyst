@@ -13,7 +13,7 @@ import streamlit as st
 
 from src import db
 from src.llm import OLLAMA_MODEL, explain_alert, incident_report, ollama_available
-from src.pipeline import analyze_text
+from src.pipeline import analyze_bytes
 
 st.set_page_config(page_title="AI SOC Analyst", page_icon="🛡️", layout="wide")
 db.init_db()
@@ -75,9 +75,11 @@ def styled(fig, height=320):
 # ---------- sidebar ----------
 with st.sidebar:
     st.markdown("### 🛡️ SOC Console")
-    up = st.file_uploader("Upload a log file", type=["log", "txt", "csv"],
-                          help="Linux SSH auth.log or Windows Security CSV (timestamp,host,event_id,user,ip)")
-    use_sample = st.button("Use bundled sample log", width="stretch")
+    up = st.file_uploader("Upload a log file or packet capture", type=["log", "txt", "csv", "pcap", "pcapng", "cap"],
+                          help="Linux SSH auth.log, Windows Security CSV, or a Wireshark .pcap / .pcapng capture")
+    s1, s2 = st.columns(2)
+    use_sample = s1.button("Sample auth.log", width="stretch")
+    use_pcap = s2.button("Sample PCAP", width="stretch")
     st.divider()
     st.markdown("**AI explanations**")
     live = ollama_available()
@@ -91,20 +93,22 @@ with st.sidebar:
     analyst = st.text_input("Analyst name", "analyst1", help="Recorded on status changes and notes")
 
 # ---------- analyse only when the input changes (so button clicks don't reset state) ----------
-text, name = None, None
+SAMPLES = Path(__file__).resolve().parent.parent / "data/sample_logs"
+data, name = None, None
 if up is not None:
     sig = hashlib.md5(up.getvalue()).hexdigest()
     if st.session_state.get("sig") != sig:
-        text, name = up.getvalue().decode("utf-8", errors="ignore"), up.name
+        data, name = up.getvalue(), up.name
         st.session_state["sig"] = sig
-elif use_sample:
-    sample = Path(__file__).resolve().parent.parent / "data/sample_logs/auth.log"
-    text, name = sample.read_text(), "auth.log (sample)"
-    st.session_state["sig"] = "sample"
+elif use_sample or use_pcap:
+    fname = "capture.pcap" if use_pcap else "auth.log"
+    data, name = (SAMPLES / fname).read_bytes(), f"{fname} (sample)"
+    st.session_state["sig"] = fname
 
-if text is not None:
-    df, alerts = analyze_text(text)
-    st.session_state.update(df=df, alerts=alerts, name=name, explanations={})
+if data is not None:
+    with st.spinner("Analysing..."):
+        df, alerts, kind = analyze_bytes(data)
+    st.session_state.update(df=df, alerts=alerts, name=name, kind=kind, explanations={})
     st.session_state.pop("report", None)
     st.session_state["db_ids"] = {}
     if not df.empty:
@@ -114,12 +118,13 @@ if text is not None:
 hero()
 
 if "df" not in st.session_state:
-    st.markdown("""<div class="empty"><h3>No log loaded yet</h3>
-<p>Upload a Linux SSH <code>auth.log</code> or a Windows Security CSV in the sidebar,<br>
-or click <b>Use bundled sample log</b> to see a demo with hidden attacks.</p></div>""", unsafe_allow_html=True)
+    st.markdown("""<div class="empty"><h3>No data loaded yet</h3>
+<p>Upload a Linux SSH <code>auth.log</code>, a Windows Security CSV or a Wireshark <code>.pcap</code> in the sidebar,<br>
+or click <b>Sample auth.log</b> / <b>Sample PCAP</b> to see a demo with hidden attacks.</p></div>""", unsafe_allow_html=True)
     st.stop()
 
 df, alerts = st.session_state["df"], st.session_state["alerts"]
+is_pcap = st.session_state.get("kind") == "pcap"
 if df.empty:
     st.error("No parsable events found in this file.")
     st.stop()
@@ -128,11 +133,15 @@ if df.empty:
 fails = df[df["status"] == "failure"]
 urgent = sum(a["severity"] in ("Critical", "High") for a in alerts)
 k = st.columns(5)
-kpi(k[0], "Events analysed", f"{len(df):,}", html.escape(st.session_state["name"]), "#3b82f6")
+kpi(k[0], "Packets analysed" if is_pcap else "Events analysed", f"{len(df):,}", html.escape(st.session_state["name"]), "#3b82f6")
 kpi(k[1], "Alerts", len(alerts), "rule matches", "#8b5cf6")
 kpi(k[2], "Critical / High", urgent, "act on these first", SEV_COLORS["Critical"] if urgent else SEV_COLORS["Low"])
 kpi(k[3], "Suspicious IPs", len({a["source_ip"] for a in alerts}), "unique sources in alerts", "#f97316")
-kpi(k[4], "Failed logins", f"{len(fails):,}", f"{len(fails) / len(df):.0%} of all events", "#0ea5e9")
+if is_pcap:
+    span = (df["timestamp"].max() - df["timestamp"].min()).total_seconds() / 3600
+    kpi(k[4], "Hosts seen", f"{len(set(df['source_ip']) | set(df['dst_ip'])):,}", f"over {span:.1f} h of traffic", "#0ea5e9")
+else:
+    kpi(k[4], "Failed logins", f"{len(fails):,}", f"{len(fails) / len(df):.0%} of all events", "#0ea5e9")
 st.write("")
 
 tab_overview, tab_alerts, tab_cases, tab_report = st.tabs(
@@ -144,10 +153,16 @@ case = {r["id"]: r for r in db.list_alerts()} if db_ids else {}
 with tab_overview:
     left, right = st.columns([2, 1])
     t = df.assign(bucket=df["timestamp"].dt.floor("15min"))
-    t = t.groupby(["bucket", "status"]).size().reset_index(name="events")
-    fig = px.bar(t, x="bucket", y="events", color="status", title="Activity over time (15-minute buckets)",
-                 color_discrete_map={"failure": "#ef4444", "success": "#334155", "info": "#8b5cf6"},
-                 labels={"bucket": "", "events": "events", "status": ""})
+    if is_pcap:
+        t = t.groupby(["bucket", "proto"]).size().reset_index(name="packets")
+        fig = px.bar(t, x="bucket", y="packets", color="proto", title="Packets over time by protocol (15-minute buckets)",
+                     color_discrete_sequence=["#3b82f6", "#8b5cf6", "#0ea5e9", "#f97316", "#ef4444", "#22c55e"],
+                     labels={"bucket": "", "proto": ""})
+    else:
+        t = t.groupby(["bucket", "status"]).size().reset_index(name="events")
+        fig = px.bar(t, x="bucket", y="events", color="status", title="Activity over time (15-minute buckets)",
+                     color_discrete_map={"failure": "#ef4444", "success": "#334155", "info": "#8b5cf6"},
+                     labels={"bucket": "", "events": "events", "status": ""})
     left.plotly_chart(styled(fig), width="stretch")
 
     if alerts:
@@ -159,8 +174,14 @@ with tab_overview:
         right.plotly_chart(styled(donut), width="stretch")
 
     left, right = st.columns(2)
-    if not fails.empty:
-        alert_ips = {a["source_ip"] for a in alerts}
+    alert_ips = {a["source_ip"] for a in alerts}
+    if is_pcap:
+        top = df.groupby("source_ip").size().sort_values().tail(8)
+        bars = go.Figure(go.Bar(x=top.values, y=top.index, orientation="h",
+                                marker_color=["#ef4444" if ip in alert_ips else "#475569" for ip in top.index]))
+        bars.update_layout(title="Top talkers by packets sent (red = in an alert)")
+        left.plotly_chart(styled(bars), width="stretch")
+    elif not fails.empty:
         top = fails.groupby("source_ip").size().sort_values().tail(8)
         bars = go.Figure(go.Bar(x=top.values, y=top.index, orientation="h",
                                 marker_color=["#ef4444" if ip in alert_ips else "#475569" for ip in top.index]))
@@ -172,6 +193,22 @@ with tab_overview:
         mitre.update_layout(title="MITRE ATT&CK techniques observed")
         mitre.update_xaxes(dtick=1)
         right.plotly_chart(styled(mitre), width="stretch")
+
+    if is_pcap:
+        left, right = st.columns(2)
+        ports = df[(df["flags"] == "S") & (df["dst_port"] > 0)].groupby("dst_port").size().sort_values().tail(10)
+        pfig = go.Figure(go.Bar(x=ports.values, y=[str(p) for p in ports.index], orientation="h", marker_color="#0ea5e9"))
+        pfig.update_layout(title="Most-contacted destination ports (new TCP connections)")
+        pfig.update_yaxes(type="category")
+        left.plotly_chart(styled(pfig), width="stretch")
+        with right:
+            st.markdown("##### DNS queries and HTTP requests")
+            dns_tab, http_tab = st.tabs(["DNS", "HTTP"])
+            dq = df[df["dns_query"] != ""]
+            dns_tab.dataframe(dq.groupby(["source_ip", "dns_query"]).size().reset_index(name="queries")
+                              .sort_values("queries", ascending=False), width="stretch", hide_index=True, height=300)
+            hq = df[df["http_method"] != ""][["timestamp", "source_ip", "http_method", "http_host", "http_uri"]]
+            http_tab.dataframe(hq, width="stretch", hide_index=True, height=300)
 
 # ---------- Alerts ----------
 with tab_alerts:
@@ -203,7 +240,10 @@ with tab_alerts:
 <div class="score">Risk score {a['risk_score']}/100<div class="bar"><div style="width:{a['risk_score']}%"></div></div></div>
 </div>""", unsafe_allow_html=True)
 
-        with st.expander(f"Evidence: {len(a['evidence'])} raw events"):
+        if a.get("wireshark_filter"):
+            st.caption("Wireshark display filter: paste it into Wireshark's filter bar to see the evidence packets")
+            st.code(a["wireshark_filter"], language=None)
+        with st.expander(f"Evidence: {len(a['evidence'])} raw {'packets' if is_pcap else 'events'}"):
             st.dataframe(pd.DataFrame(a["evidence"]), width="stretch", hide_index=True)
 
         if st.button("✨ Generate analyst explanation", type="primary"):
