@@ -21,24 +21,26 @@ Logs (Linux auth.log / Windows CSV)
 ## Network traffic analysis (Wireshark PCAP)
 Upload a `.pcap` / `.pcapng` capture (what Wireshark saves) and the same pipeline runs on packets:
 `pcap_parser.py` (Scapy) turns packets into rows with addresses, ports, TCP flags, DNS queries, HTTP requests and
-cleartext credentials, and `net_detector.py` applies 7 network rules. **Every alert includes a Wireshark display
+cleartext credentials and payload signatures, and `net_detector.py` applies 9 network rules. **Every alert includes a Wireshark display
 filter**: paste it into Wireshark's filter bar to jump to the evidence packets.
 
 | Rule | Logic | MITRE |
 |---|---|---|
 | Port scan | one source sends SYNs to >=20 ports on one host in 60 s | T1046 |
 | Network brute force | >=15 new connections to SSH/RDP/FTP/Telnet/VNC from one source in 60 s | T1110 |
-| Cleartext credentials | FTP `USER`/`PASS` or HTTP Basic auth on the wire (passwords are masked at parse time) | T1040 |
+| Cleartext credentials | FTP `USER`/`PASS`, HTTP Basic auth or an HTML login form posted over HTTP (passwords are masked at parse time) | T1040 |
 | Suspicious DNS | >=5 queries with a label of 30+ chars or a high-entropy (random-looking) label | T1071.004 |
 | Beaconing | >=6 connections to the same server with near-constant intervals (jitter <= 10%) | T1071.001 |
-| Suspicious download | `.exe` / `.dll` / `.ps1` / `.hta` ... fetched over plain HTTP | T1105 |
-| Suspicious port | connections to 4444, 1337, 31337, 6667, 5555 | T1571 |
+| Suspicious download | `.exe` / `.dll` / `.ps1` / `.hta` ... fetched over plain HTTP, or a response whose body **starts** with a Windows executable header (catches renamed files) | T1105 |
+| Suspicious port | an **answered** connection to 4444, 1337, 31337, 6667, 5555 | T1571 |
+| Remote shell | a `cmd.exe` banner (`Microsoft Windows [Version ...]`) or root `id` output in a TCP stream | T1059.003 |
+| Exploit shellcode | Metasploit stager byte patterns (`fc e8 89 00 00 00` ...) | T1203 |
 
 **Cross-source correlation:** an IP that attacks in both a log file and a packet capture is listed first in the
 Case queue (and at `GET /correlations`). In the samples, 203.0.113.50 port-scans and brute-forces the server in the
 capture, and its successful root login shows up in `auth.log`.
 
-`python -m src.generator` also writes `data/sample_logs/capture.pcap` with all 7 attacks hidden in normal browsing
+`python -m src.generator` also writes `data/sample_logs/capture.pcap` with 11 attacks hidden in normal browsing
 traffic. Packets are only written to a file, never sent.
 
 ## Tested on real attack data
@@ -46,6 +48,11 @@ The pipeline was also run on a **real** SSH log from an internet-facing AWS serv
 Dec 2014): **14,825 attack events parsed in about 10 s, 236 alerts, 0 internal IPs alerted, and 2 root brute-force
 bursts found**, including events whose source IP had to be recovered from another line of the same sshd process.
 Full write-up: [docs/real-data-results.md](docs/real-data-results.md). Reproduce: `python scripts/real_data_benchmark.py`.
+
+The network rules were run on **13 real public packet captures** (Practical Packet Analysis, Wireshark wiki):
+**4 of 7 attacks detected, 0 of 6 normal captures falsely flagged**, ~107,600 packets. Testing on real traffic removed
+scan noise, added three detections and fixed one false positive; the 3 misses are documented with what would catch
+them. Write-up: [docs/pcap-real-results.md](docs/pcap-real-results.md). Reproduce: `python scripts/pcap_benchmark.py`.
 
 ## SIEM-ready detections
 Every rule is also written as a **Splunk SPL** and **Microsoft Sentinel KQL** query in [detections/](detections/),

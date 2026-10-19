@@ -18,6 +18,8 @@ MITRE_MAP = {
     "beaconing": {"id": "T1071.001", "name": "Application Layer Protocol: Web Protocols (C2 beaconing)", "tactic": "Command and Control"},
     "suspicious_download": {"id": "T1105", "name": "Ingress Tool Transfer", "tactic": "Command and Control"},
     "suspicious_port": {"id": "T1571", "name": "Non-Standard Port", "tactic": "Command and Control"},
+    "remote_shell": {"id": "T1059.003", "name": "Command and Scripting Interpreter: Windows Command Shell", "tactic": "Execution"},
+    "exploit_shellcode": {"id": "T1203", "name": "Exploitation for Client Execution", "tactic": "Execution"},
 }
 
 

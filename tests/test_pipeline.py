@@ -189,7 +189,7 @@ def test_pcap_passwords_are_masked(tmp_path):
     data, _ = _sample_pcap(tmp_path)
     df, alerts, _ = analyze_bytes(data)
     everything = df.to_csv() + str(alerts)
-    assert "Winter2026!" not in everything and "admin123" not in everything
+    assert "Winter2026!" not in everything and "admin123" not in everything and "Summer2026" not in everything
     assert "W***" in everything and "a***" in everything
 
 
@@ -238,3 +238,37 @@ def test_cross_source_correlation(tmp_path):
     assert [c["source_ip"] for c in corr] == ["203.0.113.50"]          # the only IP in both sources
     assert corr[0]["log_rules"] == ["brute_force", "success_after_failures"]
     assert corr[0]["network_rules"] == ["net_brute_force", "port_scan"]
+
+
+def test_suspicious_port_needs_an_answer():
+    from src.net_detector import detect_network
+    from src.pcap_parser import COLUMNS
+    base = dict.fromkeys(COLUMNS, "") | {"timestamp": pd.Timestamp("2026-01-01"), "proto": "TCP", "length": 60}
+    probe = base | {"source_ip": "10.0.0.5", "dst_ip": "198.51.100.9", "src_port": 50000, "dst_port": 4444, "flags": "S"}
+    reply = base | {"source_ip": "198.51.100.9", "dst_ip": "10.0.0.5", "src_port": 4444, "dst_port": 50000, "flags": "SA"}
+    assert detect_network(pd.DataFrame([probe])) == []                     # scan probe, nobody answered
+    assert [a["rule"] for a in detect_network(pd.DataFrame([probe, reply]))] == ["suspicious_port"]
+
+
+def test_executable_inside_a_big_download_is_not_flagged(tmp_path):
+    """An ISO or archive that merely CONTAINS a Windows executable must not alert (found on a real capture)."""
+    import logging
+    logging.getLogger("scapy").setLevel(logging.ERROR)
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+    from scapy.utils import wrpcap
+    from src.pipeline import analyze_bytes
+    e = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02")
+    pkts = [e / IP(src="10.0.0.5", dst="72.4.123.180") / TCP(sport=3218, dport=80, flags="PA") /
+            b"GET /distro/linux-dvd.iso HTTP/1.1\r\nHost: mirror.example\r\n\r\n",
+            e / IP(src="72.4.123.180", dst="10.0.0.5") / TCP(sport=80, dport=3218, flags="PA") /
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n",
+            e / IP(src="72.4.123.180", dst="10.0.0.5") / TCP(sport=80, dport=3218, flags="PA") / (b"\x00CD001" + b"\x00" * 64),
+            e / IP(src="72.4.123.180", dst="10.0.0.5") / TCP(sport=80, dport=3218, flags="A") /
+            (b"\x00" * 30 + b"MZ\x90\x00" + b"\x00" * 40 + b"This program cannot be run in DOS mode.")]
+    for i, p in enumerate(pkts):
+        p.time = 1790000000 + i
+    path = tmp_path / "iso.pcap"
+    wrpcap(str(path), pkts)
+    _, alerts, _ = analyze_bytes(path.read_bytes())
+    assert alerts == []

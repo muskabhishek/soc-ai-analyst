@@ -190,6 +190,31 @@ def generate_pcap(path, seed=11):
     syn(15060, "10.0.0.31", "203.0.113.99", 4444, answer="SA")
     truth |= {("suspicious_download", "10.0.0.31"), ("suspicious_port", "10.0.0.31")}
 
+    # ATTACK 7b: an executable disguised as an image - only the file header gives it away
+    sport = syn(15500, "10.0.0.32", "203.0.113.98", 80, answer="SA")
+    add(15500.05, IP(src="10.0.0.32", dst="203.0.113.98"), TCP(sport=sport, dport=80, flags="PA", seq=1001, ack=5001),
+        b"GET /images/logo.jpg HTTP/1.1\r\nHost: static-cdn.example\r\n\r\n")
+    add(15500.10, IP(src="203.0.113.98", dst="10.0.0.32"), TCP(sport=80, dport=sport, flags="PA", seq=5001, ack=1050),
+        b"HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\n\r\n")
+    add(15500.15, IP(src="203.0.113.98", dst="10.0.0.32"), TCP(sport=80, dport=sport, flags="PA", seq=5050, ack=1050),
+        b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff" + b"\x00" * 50 + b"This program cannot be run in DOS mode.")
+    truth.add(("suspicious_download", "10.0.0.32"))
+
+    # ATTACK 8: login form posted over plain HTTP (credentials in the POST body)
+    tcp_send(16000, "10.0.0.17", "203.0.113.81", 80, b"POST /login.php HTTP/1.1\r\nHost: portal.example\r\n"
+             b"Content-Type: application/x-www-form-urlencoded\r\n\r\nusername=carol&password=Summer2026&submit=Login")
+    truth.add(("cleartext_credentials", "10.0.0.17"))
+
+    # ATTACK 9+10: exploit delivers shellcode, then the victim opens a reverse shell back to the attacker
+    victim, c2 = "10.0.0.40", "198.51.100.66"
+    sport = syn(17000, victim, c2, 8080, answer="SA")
+    add(17000.2, IP(src=c2, dst=victim), TCP(sport=8080, dport=sport, flags="PA", seq=5001, ack=1001),
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n"
+        b"\xfc\xe8\x89\x00\x00\x00\x60\x89\xe5\x31\xd2\x64\x8b\x52\x30")
+    tcp_send(17005, victim, c2, 4321, b"Microsoft Windows [Version 10.0.19045.3803]\r\n"
+             b"(c) Microsoft Corporation. All rights reserved.\r\n\r\nC:\\Users\\dave>")
+    truth |= {("exploit_shellcode", c2), ("remote_shell", victim)}
+
     pkts.sort(key=lambda p: p.time)
     wrpcap(str(path), pkts)
     return truth

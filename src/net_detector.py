@@ -21,7 +21,8 @@ NET_CONFIG = {
                                   5555: "Android ADB / common RAT port"}},
 }
 NET_RULES = {"port_scan", "net_brute_force", "cleartext_credentials", "suspicious_dns", "beaconing",
-             "suspicious_download", "suspicious_port"}
+             "suspicious_download", "suspicious_port", "remote_shell", "exploit_shellcode"}
+SIG_FILTERS = {"cmd_banner": 'tcp contains "Microsoft Windows"', "root_shell": 'tcp contains "uid=0(root)"'}
 EVIDENCE_COLS = ["timestamp", "source_ip", "src_port", "dst_ip", "dst_port", "proto", "flags", "length", "info"]
 
 
@@ -121,21 +122,48 @@ def detect_network(df, config=None):
                 f"ip.src=={src} && ip.dst=={dst} && tcp.dstport=={port} && tcp.flags.syn==1 && tcp.flags.ack==0",
                 peer=dst))
 
-    # 6. Executable or script downloaded over plain HTTP
+    # 6. Executable or script downloaded over plain HTTP: by file extension in the request, or by the file itself
+    #    (Windows "MZ ... This program cannot be run in DOS mode" header / executable content type) in the response,
+    #    which also catches executables renamed to .jpg or .bin
     exts = cfg["suspicious_download"]["extensions"]
     dl = df[(df["http_method"] == "GET") & df["http_uri"].str.lower().str.split("?").str[0].str.endswith(exts)]
-    for (src, dst), g in dl.groupby(["source_ip", "dst_ip"]):
-        files = ", ".join(sorted(set(g["http_host"] + g["http_uri"])))[:200]
-        alerts.append(_alert("suspicious_download", src, g,
-            f"{src} downloaded executable content over unencrypted HTTP from {dst}: {files}.",
-            f'ip.src=={src} && ip.dst=={dst} && http.request.uri matches "\\\\.(exe|dll|ps1|hta|vbs|bat|scr|msi|jar)"',
-            peer=dst))
+    pe = df[df["signature"] == "pe_file"]
+    pairs = {(r.source_ip, r.dst_ip) for r in dl.itertuples()} | {(r.dst_ip, r.source_ip) for r in pe.itertuples()}
+    for client, server in sorted(pairs):
+        g = pd.concat([dl[(dl["source_ip"] == client) & (dl["dst_ip"] == server)],
+                       pe[(pe["source_ip"] == server) & (pe["dst_ip"] == client)]]).sort_values("timestamp")
+        reqs = g[g["http_method"] == "GET"]
+        files = ", ".join(sorted(set(reqs["http_host"] + reqs["http_uri"])))[:200] or "file name not in the request"
+        how = "executable file header seen in the response" if len(g) > len(reqs) else "executable file extension"
+        alerts.append(_alert("suspicious_download", client, g,
+            f"{client} downloaded executable content over unencrypted HTTP from {server} ({how}): {files}.",
+            f'ip.addr=={client} && ip.addr=={server} && (http.request.uri matches "\\\\.(exe|dll|ps1|hta|vbs|bat|scr|msi|jar)" '
+            f'|| tcp contains "This program cannot be run in DOS mode")', peer=server))
 
-    # 7. Connections to ports associated with backdoors and C2 frameworks
+    # 7. Connections to ports associated with backdoors and C2 frameworks - only when the other side ANSWERED
+    #    (SYN-ACK), so a port scan that merely touches these ports does not raise extra alerts
     ports = cfg["suspicious_port"]["ports"]
+    answered = {(r.dst_ip, r.source_ip, r.src_port) for r in df[df["flags"] == "SA"].itertuples()}
     for (src, dst, port), g in syn[syn["dst_port"].isin(list(ports))].groupby(["source_ip", "dst_ip", "dst_port"]):
-        alerts.append(_alert("suspicious_port", src, g,
-            f"{src} connected to {dst}:{port} ({ports[port]}).",
-            f"ip.addr=={src} && ip.addr=={dst} && tcp.port=={port}", peer=dst))
+        if (src, dst, port) in answered:
+            alerts.append(_alert("suspicious_port", src, g,
+                f"{src} opened a connection to {dst}:{port} ({ports[port]}).",
+                f"ip.addr=={src} && ip.addr=={dst} && tcp.port=={port}", peer=dst))
+
+    # 8. Remote shell: a command-prompt banner or root `id` output travelling over the network
+    for (src, dst), g in df[df["signature"].isin(["cmd_banner", "root_shell"])].groupby(["source_ip", "dst_ip"]):
+        kind = g["signature"].iloc[0]
+        shell = "Windows command prompt" if kind == "cmd_banner" else "root shell"
+        ports_used = ", ".join(sorted({f"{s}->{d}" for s, d in zip(g["src_port"], g["dst_port"])}))[:120]
+        alerts.append(_alert("remote_shell", src, g,
+            f"{src} sent a {shell} to {dst} (ports {ports_used}) - someone at {dst} is typing commands on {src}.",
+            f"ip.src=={src} && ip.dst=={dst} && {SIG_FILTERS[kind]}", peer=dst))
+
+    # 9. Exploit payload: Metasploit-style shellcode stager bytes on the wire
+    for (src, dst), g in df[df["signature"] == "shellcode"].groupby(["source_ip", "dst_ip"]):
+        alerts.append(_alert("exploit_shellcode", src, g,
+            f"{src} sent shellcode (Metasploit stager byte pattern) to {dst} - an exploit is being delivered.",
+            f"ip.src=={src} && ip.dst=={dst} && (tcp contains fc:e8:89:00:00:00 || tcp contains fc:e8:82:00:00:00)",
+            peer=dst))
 
     return alerts
