@@ -182,6 +182,31 @@ def case_metrics(path=None):
         }
 
 
+def correlations(path=None):
+    """IPs that triggered alerts in BOTH log files and packet captures: one attacker seen by two independent
+    sources is stronger evidence than either alone, so these are listed first for triage."""
+    from .net_detector import NET_RULES
+    marks = ",".join("?" * len(NET_RULES))
+    with conn(path) as c:
+        rows = c.execute(f"""
+            SELECT source_ip,
+                   GROUP_CONCAT(DISTINCT CASE WHEN rule NOT IN ({marks}) THEN rule END) AS log_rules,
+                   GROUP_CONCAT(DISTINCT CASE WHEN rule IN ({marks}) THEN rule END) AS network_rules,
+                   COUNT(*) AS alerts, MAX(risk_score) AS max_risk, MIN(start) AS first_seen, MAX(end) AS last_seen,
+                   SUM(status != 'Closed') AS open_alerts
+            FROM alerts WHERE source_ip NOT IN ('unknown', '')
+            GROUP BY source_ip
+            HAVING SUM(rule IN ({marks})) > 0 AND SUM(rule NOT IN ({marks})) > 0
+            ORDER BY max_risk DESC""", [*NET_RULES] * 4).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["log_rules"] = sorted(d["log_rules"].split(","))
+            d["network_rules"] = sorted(d["network_rules"].split(","))
+            out.append(d)
+        return out
+
+
 def stats(path=None):
     with conn(path) as c:
         return {

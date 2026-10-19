@@ -34,6 +34,10 @@ filter**: paste it into Wireshark's filter bar to jump to the evidence packets.
 | Suspicious download | `.exe` / `.dll` / `.ps1` / `.hta` ... fetched over plain HTTP | T1105 |
 | Suspicious port | connections to 4444, 1337, 31337, 6667, 5555 | T1571 |
 
+**Cross-source correlation:** an IP that attacks in both a log file and a packet capture is listed first in the
+Case queue (and at `GET /correlations`). In the samples, 203.0.113.50 port-scans and brute-forces the server in the
+capture, and its successful root login shows up in `auth.log`.
+
 `python -m src.generator` also writes `data/sample_logs/capture.pcap` with all 7 attacks hidden in normal browsing
 traffic. Packets are only written to a file, never sent.
 
@@ -91,6 +95,7 @@ Env vars: `OLLAMA_URL` (default `http://localhost:11434`), `OLLAMA_MODEL` (defau
 | `PATCH /alerts/{id}/status` | move a case: New -> In Progress / Escalated -> Closed (closing needs a disposition) |
 | `PATCH /alerts/{id}/assign` | assign the alert to an analyst |
 | `POST /alerts/{id}/notes`, `GET /alerts/{id}/activity` | analyst notes and the full audit trail |
+| `GET /correlations` | IPs that attacked in both log files and packet captures |
 | `GET /metrics` | SOC KPIs: queue by status, MTTA, MTTR, false-positive rate overall and per rule |
 
 ## Case workflow (alert triage like a real ticket queue)

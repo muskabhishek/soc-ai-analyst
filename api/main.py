@@ -122,3 +122,9 @@ def activity(alert_id: int):
 def metrics():
     """Queue by status, MTTA / MTTR in minutes, false-positive rate overall and per rule."""
     return db.case_metrics()
+
+
+@app.get("/correlations")
+def correlations():
+    """IPs seen attacking in both log files and packet captures."""
+    return db.correlations()

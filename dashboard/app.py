@@ -298,6 +298,23 @@ with tab_cases:
     kpi(q[4], "False-positive rate", "-" if m["false_positive_rate_pct"] is None else f"{m['false_positive_rate_pct']}%",
         f"of {m['closed']} closed alerts", SEV_COLORS["Medium"])
     st.write("")
+    corr = db.correlations()
+    st.markdown("##### 🔗 Cross-source correlations")
+    if corr:
+        st.caption("These IPs attacked in BOTH log files and packet captures. Two independent sources agreeing is "
+                   "strong evidence: triage these first.")
+        for c in corr:
+            st.markdown(f"""<div class="alert-card" style="--sev:{SEV_COLORS['Critical']}">
+<div class="head"><span class="title">{html.escape(c['source_ip'])}</span><span class="pill">{c['alerts']} alerts</span>
+<span class="pill" style="--sev:#f97316">max risk {c['max_risk']}</span></div>
+<div class="chips" style="margin-top:10px"><span class="chip">Logs <b>{html.escape(', '.join(c['log_rules']))}</b></span>
+<span class="chip">Network <b>{html.escape(', '.join(c['network_rules']))}</b></span>
+<span class="chip">Open <b>{c['open_alerts']}</b></span>
+<span class="chip">Seen <b>{html.escape(str(c['first_seen']))} → {html.escape(str(c['last_seen']))}</b></span></div>
+</div>""", unsafe_allow_html=True)
+    else:
+        st.info("No IP has been seen in both a log file and a packet capture yet. Load the sample auth.log and the "
+                "sample PCAP: the same attacker, 203.0.113.50, appears in both.")
     left, right = st.columns([3, 2])
     with left:
         st.markdown("##### Alert queue (all uploads)")

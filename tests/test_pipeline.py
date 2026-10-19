@@ -221,3 +221,20 @@ def test_api_accepts_pcap(monkeypatch, tmp_path):
     data, truth = _sample_pcap(tmp_path)
     r = TestClient(app).post("/upload-logs", files={"file": ("capture.pcap", data)})
     assert r.status_code == 200 and r.json()["kind"] == "pcap" and len(r.json()["alerts"]) == len(truth)
+
+
+def test_cross_source_correlation(tmp_path):
+    from src import db
+    from src.pipeline import analyze_bytes
+    path = str(tmp_path / "corr.db")
+    db.init_db(path)
+    lines, _ = generate_linux_log()
+    df, alerts, _ = analyze_bytes("\n".join(lines).encode())
+    db.save_analysis("auth.log", df, alerts, path=path)
+    data, _ = _sample_pcap(tmp_path)
+    df, alerts, _ = analyze_bytes(data)
+    db.save_analysis("capture.pcap", df, alerts, path=path)
+    corr = db.correlations(path=path)
+    assert [c["source_ip"] for c in corr] == ["203.0.113.50"]          # the only IP in both sources
+    assert corr[0]["log_rules"] == ["brute_force", "success_after_failures"]
+    assert corr[0]["network_rules"] == ["net_brute_force", "port_scan"]
