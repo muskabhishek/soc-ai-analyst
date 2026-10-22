@@ -28,11 +28,11 @@ EVIDENCE_COLS = ["timestamp", "source_ip", "src_port", "dst_ip", "dst_port", "pr
 
 def _alert(rule, src, sub, desc, wfilter, count=None, peer=None, users=()):
     ev = sub.head(MAX_EVIDENCE)[EVIDENCE_COLS].copy()
-    ev["timestamp"] = ev["timestamp"].astype(str)
+    ev["timestamp"] = ev["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S.%f").str[:-3]
     return {
         "rule": rule, "source_ip": src, "peer_ip": peer, "host": peer or "-",
         "users": sorted({u for u in users if u})[:20], "count": int(count if count is not None else len(sub)),
-        "start": str(sub["timestamp"].min()), "end": str(sub["timestamp"].max()),
+        "start": f"{sub['timestamp'].min():%Y-%m-%d %H:%M:%S}", "end": f"{sub['timestamp'].max():%Y-%m-%d %H:%M:%S}",
         "description": desc, "evidence": ev.to_dict("records"), "wireshark_filter": wfilter, "data_source": "pcap",
     }
 

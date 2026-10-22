@@ -53,7 +53,7 @@ st.markdown("""<style>
 
 def hero():
     st.markdown("""<div class="hero"><h1>🛡️ AI-Powered SOC Analyst</h1>
-<p>Tier-1 triage for authentication logs: detect, classify, prioritise and report.</p>
+<p>Tier-1 triage for security logs and Wireshark packet captures: detect, classify, prioritise and report.</p>
 <div class="tags"><span>Python detects</span><span>MITRE ATT&amp;CK classifies</span><span>Local LLM explains</span>
 <span>Defensive use on your own logs only</span></div></div>""", unsafe_allow_html=True)
 
@@ -78,7 +78,7 @@ with st.sidebar:
     up = st.file_uploader("Upload a log file or packet capture", type=["log", "txt", "csv", "pcap", "pcapng", "cap"],
                           help="Linux SSH auth.log, Windows Security CSV, or a Wireshark .pcap / .pcapng capture")
     s1, s2 = st.columns(2)
-    use_sample = s1.button("Sample auth.log", width="stretch")
+    use_sample = s1.button("Sample log", width="stretch")
     use_pcap = s2.button("Sample PCAP", width="stretch")
     st.divider()
     st.markdown("**AI explanations**")
@@ -100,8 +100,9 @@ if up is not None:
     if st.session_state.get("sig") != sig:
         data, name = up.getvalue(), up.name
         st.session_state["sig"] = sig
-elif use_sample or use_pcap:
-    fname = "capture.pcap" if use_pcap else "auth.log"
+elif use_sample or use_pcap or (st.query_params.get("sample") in ("auth", "pcap") and "sig" not in st.session_state):
+    # ?sample=auth or ?sample=pcap in the URL opens the dashboard straight on a demo
+    fname = "capture.pcap" if use_pcap or (not use_sample and st.query_params.get("sample") == "pcap") else "auth.log"
     data, name = (SAMPLES / fname).read_bytes(), f"{fname} (sample)"
     st.session_state["sig"] = fname
 
@@ -120,7 +121,7 @@ hero()
 if "df" not in st.session_state:
     st.markdown("""<div class="empty"><h3>No data loaded yet</h3>
 <p>Upload a Linux SSH <code>auth.log</code>, a Windows Security CSV or a Wireshark <code>.pcap</code> in the sidebar,<br>
-or click <b>Sample auth.log</b> / <b>Sample PCAP</b> to see a demo with hidden attacks.</p></div>""", unsafe_allow_html=True)
+or click <b>Sample log</b> / <b>Sample PCAP</b> to see a demo with hidden attacks.</p></div>""", unsafe_allow_html=True)
     st.stop()
 
 df, alerts = st.session_state["df"], st.session_state["alerts"]
@@ -169,9 +170,10 @@ with tab_overview:
         sev = pd.Series([a["severity"] for a in alerts]).value_counts().reindex(SEV_ORDER).dropna()
         donut = go.Figure(go.Pie(labels=sev.index, values=sev.values, hole=.62, sort=False,
                                  marker=dict(colors=[SEV_COLORS[s] for s in sev.index], line=dict(color="#0b1220", width=2))))
-        donut.update_layout(title="Alerts by severity", annotations=[dict(text=f"<b>{len(alerts)}</b><br>alerts",
+        donut.update_layout(title="Alerts by severity", legend=dict(orientation="h", y=-0.08, x=0.5, xanchor="center"), annotations=[dict(text=f"<b>{len(alerts)}</b><br>alerts",
                             showarrow=False, font=dict(size=18, color="#f8fafc"))])
-        right.plotly_chart(styled(donut), width="stretch")
+        right.plotly_chart(styled(donut).update_layout(legend=dict(orientation="h", y=-0.08, x=0.5, xanchor="center")),
+                           width="stretch")
 
     left, right = st.columns(2)
     alert_ips = {a["source_ip"] for a in alerts}
@@ -228,7 +230,7 @@ with tab_alerts:
                                                       f"  ·  {a['source_ip']}" for a in alerts if a["alert_id"] == i))
         a = next(x for x in alerts if x["alert_id"] == sel)
         e, m = html.escape, a["mitre"]
-        users = ", ".join(a["users"][:6]) + (" …" if len(a["users"]) > 6 else "")
+        users = (", ".join(a["users"][:6]) + (" …" if len(a["users"]) > 6 else "")) or "-"
         st.markdown(f"""<div class="alert-card" style="--sev:{SEV_COLORS[a['severity']]}">
 <div class="head"><span class="title">Alert #{a['alert_id']} · {e(a['rule'].replace('_', ' ').title())}</span>
 <span class="pill">{a['severity']}</span></div>
