@@ -1,0 +1,39 @@
+rule: port_scan
+title: Port scan
+group: Network
+summary: >-
+  One source sent connection attempts (SYN) to many ports on one host in a short time, without completing
+  the handshakes. It is reconnaissance: mapping which services are open.
+why_attackers: >-
+  Before attacking, they need to know which doors exist. Open ports point them to the service to brute-force
+  or exploit next.
+base_signal: {lean: info, text: "{count} ports probed in a short burst is a scan; internet-facing hosts see this constantly"}
+five_ws:
+  who: {ask: "Which source is scanning, internal or external?", auto: "{source_ip} ({ip_type})"}
+  what: {ask: "How many ports, and which ones answered (open)?", auto: "{count} ports probed; same source also triggered: {related_rules}"}
+  when: {ask: "When, and how fast?", auto: "{date}, {start_time} for {duration}"}
+  where: {ask: "Which target, and should it be reachable from that source?", auto: "target {peer_ip} ({peer_type})"}
+  why: {ask: "Is it the company's own vulnerability scanner or an authorised pentest?", auto: ""}
+  how: {ask: "Technique and evidence?", auto: "{mitre_id} {mitre_name}. Wireshark: {wireshark_filter}"}
+true_positive_signs:
+  - External or unknown source
+  - Followed by brute force, exploit traffic or logins from the same source
+  - Internal source that is a normal workstation (possible infected host scanning inside)
+false_positive_signs:
+  - The organisation's own scanner (Nessus, Qualys) on its usual schedule
+  - An authorised penetration test with a known source IP
+investigate:
+  - Check which ports answered SYN-ACK (open services) using the Wireshark filter
+  - Look for follow-up activity from the same source
+  - Confirm with the vulnerability-management team whether a scan was scheduled
+verdict_guide:
+  true_positive: An unknown source; low impact alone, higher if it followed up or the source is an internal workstation.
+  false_positive: The company's own scanner or an approved pentest (Benign True Positive).
+  escalate: An internal workstation scanning, or a scan followed by successful exploitation or logins.
+comment_template: >-
+  Port scan. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: block the source and watch it for follow-up activity.
+next_steps:
+  - Block the source at the perimeter
+  - Close services that should not be exposed
+  - Watch the source for follow-up attacks

@@ -1,0 +1,39 @@
+rule: net_brute_force
+title: Brute force seen on the network
+group: Network
+summary: >-
+  A burst of new connections from one source to a login service (SSH, RDP, FTP, Telnet, VNC). Each
+  connection is usually one or more password attempts.
+why_attackers: >-
+  Same goal as log-based brute force: a working password. Seeing it in traffic helps when the target
+  server's own logs are missing.
+base_signal: {lean: TP, text: "{count} new connections to a login port in a minute is automated guessing"}
+five_ws:
+  who: {ask: "Which source?", auto: "{source_ip} ({ip_type})"}
+  what: {ask: "How many connections, and did any session last long or move data (a successful login)?", auto: "{count} new connections; same source also triggered: {related_rules}"}
+  when: {ask: "When?", auto: "{date}, {start_time} for {duration}"}
+  where: {ask: "Which server and service?", auto: "target {peer_ip} ({peer_type}); {description}"}
+  why: {ask: "A monitoring tool or a misbehaving client reconnecting in a loop?", auto: ""}
+  how: {ask: "Technique and evidence?", auto: "{mitre_id} {mitre_name}. Wireshark: {wireshark_filter}"}
+true_positive_signs:
+  - External source
+  - Preceded by a port scan from the same source
+  - One connection much longer or larger than the others (a successful login)
+false_positive_signs:
+  - A known monitoring system checking the service
+  - A legitimate client stuck in a reconnect loop (check with its owner)
+investigate:
+  - Look at connection durations and sizes for a successful session
+  - Check the server's own auth logs for the same time and IP
+  - Check for a preceding scan
+verdict_guide:
+  true_positive: An unknown source hammering a login service.
+  false_positive: A known internal monitor or client with an explanation.
+  escalate: Any sign of a successful session from the source.
+comment_template: >-
+  Network brute force. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: block the source and check the server's auth logs for a success.
+next_steps:
+  - Block the source
+  - Check the server's auth logs for a successful login
+  - Rate-limit or VPN-restrict the service

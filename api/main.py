@@ -128,3 +128,51 @@ def metrics():
 def correlations():
     """IPs seen attacking in both log files and packet captures."""
     return db.correlations()
+
+
+# ---------------- triage playbooks and 5W worksheets ----------------
+
+class Worksheet(BaseModel):
+    answers: dict[str, str] = {}
+    verdict: str = ""
+    comment: str = ""
+    author: str = "analyst"
+
+
+@app.get("/playbooks")
+def playbooks():
+    """All triage playbooks (one per detection rule)."""
+    from src.playbooks import load_playbooks
+    return [{"rule": r, "title": p["title"], "group": p["group"], "summary": p["summary"]}
+            for r, p in load_playbooks().items()]
+
+
+@app.get("/playbooks/{rule}")
+def playbook(rule: str, alert_id: int | None = None):
+    """A playbook; with ?alert_id it also returns the 5 Ws pre-filled from that alert, the evidence signals,
+    a suggested verdict and a drafted closing comment."""
+    from src import playbooks as pb
+    book = pb.get_playbook(rule)
+    if not book:
+        raise HTTPException(404, "No playbook for this rule")
+    if alert_id is None:
+        return book
+    a = db.get_alert(alert_id)
+    if not a or a["rule"] != rule:
+        raise HTTPException(404, "Alert not found for this playbook")
+    signals = pb.evidence_signals(book, a)
+    return {"playbook": book, "five_ws": pb.fill_five_ws(book, a), "signals": signals,
+            "suggested_verdict": pb.suggest_verdict(signals), "draft_comment": pb.draft_comment(book, a)}
+
+
+@app.get("/alerts/{alert_id}/worksheet")
+def get_worksheet(alert_id: int):
+    if not db.get_alert(alert_id):
+        raise HTTPException(404, "Alert not found")
+    return db.get_worksheet(alert_id) or {}
+
+
+@app.put("/alerts/{alert_id}/worksheet")
+def put_worksheet(alert_id: int, body: Worksheet):
+    _case_call(db.save_worksheet, alert_id, body.model_dump(exclude={"author"}), body.author)
+    return db.get_worksheet(alert_id)

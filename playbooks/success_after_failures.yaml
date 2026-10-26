@@ -1,0 +1,41 @@
+rule: success_after_failures
+title: Successful login after failures
+group: Logs
+summary: >-
+  A login succeeded from an IP that had just failed several times. The guessing worked: assume the
+  account is compromised until proven otherwise.
+why_attackers: >-
+  This is the moment brute force or spraying pays off. From here the attacker has a valid account
+  (initial access) and can explore, add persistence or move laterally.
+base_signal: {lean: TP, text: "A success right after {count} failures from the same IP means the guessing worked"}
+five_ws:
+  who: {ask: "Which account logged in, from which IP?", auto: "{users} from {source_ip} ({ip_type})"}
+  what: {ask: "How many failures preceded it, and what did the account do after logging in?", auto: "{count} failures, then a successful login; also from this IP: {related_rules}"}
+  when: {ask: "Exact time of the success, and the timeline after it?", auto: "{date}, failures from {start_time}, success at the end of a {duration} window"}
+  where: {ask: "Which server, and what can this account reach from it?", auto: "{host}"}
+  why: {ask: "Was this the real user, who mistyped a few times and then got it right? Confirm with them.", auto: ""}
+  how: {ask: "Technique?", auto: "{mitre_id} {mitre_name}: valid credentials obtained by guessing"}
+true_positive_signs:
+  - External IP the user has never used before
+  - Privileged account (root, administrator)
+  - Failures were fast and automated, not a handful over minutes
+  - New processes, accounts or outbound connections right after the login
+false_positive_signs:
+  - The real user confirms they mistyped and then logged in, from their usual IP and device
+  - Few failures spread over minutes, at a normal hour
+investigate:
+  - Contact the account owner immediately to confirm or deny
+  - Review everything the session did (process creation, new accounts, file access, outbound traffic)
+  - Check the same IP against other hosts
+verdict_guide:
+  true_positive: An unknown or external source, automated failures, or any suspicious activity after login.
+  false_positive: Only when the owner confirms it was them, from a known IP, with nothing suspicious afterwards.
+  escalate: Always escalate a probable compromise to L2 / incident response, with the session timeline.
+comment_template: >-
+  Successful login after failures. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: disable or reset the account, end its sessions and escalate.
+next_steps:
+  - Disable or reset the account and terminate its sessions
+  - Block the source IP
+  - Review post-login activity and hunt for persistence
+  - Escalate to incident response

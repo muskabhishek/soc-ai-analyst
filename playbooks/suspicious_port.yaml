@@ -1,0 +1,38 @@
+rule: suspicious_port
+title: Connection to a backdoor or C2 port
+group: Network
+summary: >-
+  A host opened a connection, and the other side answered, on a port associated with attack tools:
+  4444 (Metasploit's default), 1337, 31337, 6667 (IRC botnets), 5555.
+why_attackers: >-
+  Default listener ports are used by reverse shells and remote-access tools, especially when the attacker
+  did not bother to change them.
+base_signal: {lean: TP, text: "An answered connection on a port typical of attack tools"}
+five_ws:
+  who: {ask: "Which internal host opened it?", auto: "{source_ip} ({ip_type})"}
+  what: {ask: "How long did the session last, and how much data moved?", auto: "{description}"}
+  when: {ask: "When, and what happened on the host just before?", auto: "{date} at {start_time}; same host also triggered: {related_rules}"}
+  where: {ask: "Which destination, internal or on the internet?", auto: "{peer_ip} ({peer_type})"}
+  why: {ask: "Does a legitimate application use this port here (some dev tools, Android debugging on 5555)?", auto: ""}
+  how: {ask: "Technique and evidence?", auto: "{mitre_id} {mitre_name}. Wireshark: {wireshark_filter}"}
+true_positive_signs:
+  - External destination
+  - Follows a suspicious download or exploit on the same host
+  - Long session or interactive traffic (a shell)
+false_positive_signs:
+  - A documented internal application or developer tool on that port
+investigate:
+  - Follow the TCP stream: is it a shell, a tool, or application data?
+  - Find the process using the port on the host (EDR)
+  - Check the destination's reputation
+verdict_guide:
+  true_positive: An external destination or interactive content in the stream.
+  false_positive: A documented internal application.
+  escalate: Any shell-like content or link to other alerts on the host.
+comment_template: >-
+  Backdoor-port connection. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: inspect the stream, identify the process and isolate if it is a shell.
+next_steps:
+  - Identify the process; isolate the host if it is a shell or RAT
+  - Block the destination
+  - Restrict outbound traffic to approved ports

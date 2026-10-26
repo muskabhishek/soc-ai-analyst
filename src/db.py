@@ -44,6 +44,7 @@ def init_db(path=None):
             created_at TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS activity(id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id INTEGER, author TEXT,
             action TEXT, detail TEXT, created_at TEXT);
+        CREATE TABLE IF NOT EXISTS worksheets(alert_id INTEGER PRIMARY KEY, data TEXT, author TEXT, updated_at TEXT);
         """)
         for table, cols in _MIGRATIONS.items():
             have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
@@ -149,6 +150,23 @@ def add_note(alert_id, text, author="analyst", path=None):
         if not c.execute("SELECT 1 FROM alerts WHERE id=?", (alert_id,)).fetchone():
             raise KeyError(alert_id)
         _log(c, alert_id, author, "note", text)
+
+
+def save_worksheet(alert_id, worksheet, author="analyst", path=None):
+    """Store the analyst's 5W triage worksheet ({'answers': {who..how}, 'verdict', 'comment'}) and log it."""
+    from .playbooks import worksheet_note
+    with conn(path) as c:
+        if not c.execute("SELECT 1 FROM alerts WHERE id=?", (alert_id,)).fetchone():
+            raise KeyError(alert_id)
+        c.execute("INSERT OR REPLACE INTO worksheets(alert_id,data,author,updated_at) VALUES(?,?,?,?)",
+                  (alert_id, json.dumps(worksheet), author or "analyst", _now()))
+        _log(c, alert_id, author, "worksheet", worksheet_note(worksheet))
+
+
+def get_worksheet(alert_id, path=None):
+    with conn(path) as c:
+        r = c.execute("SELECT data,author,updated_at FROM worksheets WHERE alert_id=?", (alert_id,)).fetchone()
+        return {**json.loads(r["data"]), "author": r["author"], "updated_at": r["updated_at"]} if r else None
 
 
 def get_activity(alert_id, path=None):

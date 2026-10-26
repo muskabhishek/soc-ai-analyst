@@ -1,0 +1,39 @@
+rule: new_account_created
+title: New user account created (Event 4720)
+group: Logs
+summary: >-
+  A user account was created on a Windows system. Usually routine IT work, but attackers create accounts
+  to keep access even if the first stolen password is changed.
+why_attackers: >-
+  A backup account is the simplest persistence. Names are chosen to blend in (svc_update, helpdesk2,
+  backup_admin), and the account is often added to Administrators next.
+base_signal: {lean: info, text: "A new account on its own is routine; it matters who created it, when, and what happened next"}
+five_ws:
+  who: {ask: "Which account created it, and from where?", auto: "Created by {users} from {source_ip} ({ip_type})"}
+  what: {ask: "Which new account, and was it added to any group?", auto: "{description} Also from this IP: {related_rules}"}
+  when: {ask: "When, and in working hours?", auto: "{date} at {start_time}"}
+  where: {ask: "On which system (domain controller, server, workstation)?", auto: "{host}"}
+  why: {ask: "Is there a matching change or onboarding ticket? Does HR / IT know about this account?", auto: ""}
+  how: {ask: "Technique?", auto: "{mitre_id} {mitre_name}: a new account for persistence"}
+true_positive_signs:
+  - No matching ticket or onboarding request
+  - Created by an account that was just involved in failed logins or an unusual login
+  - Generic or look-alike name (svc_update, admin2)
+  - Immediately added to a privileged group
+false_positive_signs:
+  - Matches an onboarding or change ticket
+  - Created by the identity team's usual admin account from the usual admin host
+investigate:
+  - Search the ticketing system for the new account name
+  - Check the creator's recent logins and other activity
+  - Check group-membership changes (4728 / 4732) for the new account
+verdict_guide:
+  true_positive: No ticket and the creator's session looks suspicious, or the account was made an admin straight away.
+  false_positive: Matches an approved request; close as Benign True Positive with the ticket number.
+  escalate: Unapproved account, especially if added to a privileged group or created on a domain controller.
+comment_template: >-
+  New account created. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: confirm a ticket exists; if not, disable the account and escalate.
+next_steps:
+  - If unapproved, disable the new account and investigate the creator
+  - Require tickets for account creation and alert on creation outside change windows

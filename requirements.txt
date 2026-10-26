@@ -6,6 +6,7 @@ plotly
 requests
 python-multipart
 scapy
+pyyaml
 # tests
 pytest
 httpx

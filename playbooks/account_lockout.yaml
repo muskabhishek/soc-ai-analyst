@@ -1,0 +1,38 @@
+rule: account_lockout
+title: Account locked out (Event 4740)
+group: Logs
+summary: >-
+  An account was locked after too many failed logons. Often a user who forgot a changed password, sometimes
+  the visible symptom of a password attack.
+why_attackers: >-
+  Lockouts are a side effect, not a goal: brute force trips them. Many lockouts across accounts can also
+  be deliberate denial of service.
+base_signal: {lean: info, text: "A lockout is a symptom: the cause (who failed, from where) decides the verdict"}
+five_ws:
+  who: {ask: "Which account, and which machine caused the failures?", auto: "{users}, failures from {source_ip} ({ip_type})"}
+  what: {ask: "How many failures led to it? Any other lockouts?", auto: "{description} Also from this IP: {related_rules}"}
+  when: {ask: "When, and right after a password change?", auto: "{date} at {start_time}"}
+  where: {ask: "Which system logged it?", auto: "{host}"}
+  why: {ask: "Did the user just change their password, with an old one saved on a phone or mapped drive?", auto: ""}
+  how: {ask: "Technique?", auto: "{mitre_id} {mitre_name}: repeated failed logons"}
+true_positive_signs:
+  - The failures come from an external or unknown machine
+  - Several accounts locked from the same source
+  - The same source then logs in successfully
+false_positive_signs:
+  - The user recently changed their password and the failures come from their own device
+  - A service with stale credentials on a known server
+investigate:
+  - Find the source of the failures (caller computer or IP)
+  - Ask the user about a recent password change and their devices
+  - Check for other lockouts and for brute-force alerts from the same source
+verdict_guide:
+  true_positive: The failures come from a source the user does not own, or several accounts are affected.
+  false_positive: The user's own device with an old password; close and help them update it.
+  escalate: An external source, many accounts, or a privileged account.
+comment_template: >-
+  Account lockout. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: identify the failing source before unlocking.
+next_steps:
+  - Identify the failing device before unlocking
+  - Block an external source; help the user clear stale saved passwords if benign

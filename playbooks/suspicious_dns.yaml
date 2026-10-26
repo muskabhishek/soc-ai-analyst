@@ -1,0 +1,39 @@
+rule: suspicious_dns
+title: Suspicious DNS queries (tunnelling or DGA)
+group: Network
+summary: >-
+  A host asked DNS for many very long or random-looking names. That is how data is smuggled out inside DNS
+  (tunnelling), and how DGA malware searches for its server.
+why_attackers: >-
+  DNS is allowed almost everywhere and rarely inspected, so it is a quiet channel for commands and stolen
+  data.
+base_signal: {lean: TP, text: "{count} long or random-looking DNS names from one host is not normal browsing"}
+five_ws:
+  who: {ask: "Which internal host is asking?", auto: "{source_ip} ({ip_type})"}
+  what: {ask: "Which names and parent domain? How many unique subdomains?", auto: "{description}"}
+  when: {ask: "When, and continuously or in bursts?", auto: "{date}, {start_time} for {duration}"}
+  where: {ask: "Which resolver, and is the parent domain known?", auto: "resolver {peer_ip} ({peer_type})"}
+  why: {ask: "Could it be a legitimate service using long names (some CDNs, antivirus lookups, telemetry)?", auto: ""}
+  how: {ask: "Technique and evidence?", auto: "{mitre_id} {mitre_name}. Wireshark: {wireshark_filter}"}
+true_positive_signs:
+  - Unknown or newly registered parent domain
+  - Many unique random subdomains under one domain
+  - Many TXT queries or NXDOMAIN answers
+false_positive_signs:
+  - A known security or CDN product that encodes data in DNS names
+  - The parent domain belongs to a trusted vendor
+investigate:
+  - Look up the parent domain's reputation and registration date
+  - Find the process on the host making the queries (EDR)
+  - Estimate how much data the names could carry
+verdict_guide:
+  true_positive: An unknown parent domain with random subdomains.
+  false_positive: A recognised vendor domain with a documented reason.
+  escalate: Confirmed tunnelling or DGA, which means possible data theft and an active infection.
+comment_template: >-
+  Suspicious DNS. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: identify the process on the host and sinkhole the domain.
+next_steps:
+  - Sinkhole or block the parent domain
+  - Identify and isolate the process and host
+  - Force all DNS through internal resolvers and monitor them

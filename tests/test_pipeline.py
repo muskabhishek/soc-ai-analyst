@@ -272,3 +272,86 @@ def test_executable_inside_a_big_download_is_not_flagged(tmp_path):
     wrpcap(str(path), pkts)
     _, alerts, _ = analyze_bytes(path.read_bytes())
     assert alerts == []
+
+
+# ---------------- triage playbooks and 5W worksheets ----------------
+
+def _all_sample_alerts(tmp_path):
+    from src.generator import generate_windows_log
+    out = []
+    for text in ("\n".join(generate_linux_log()[0]), "\n".join(generate_windows_log()[0])):
+        out.append(analyze_text(text)[1])
+    from src.pipeline import analyze_bytes
+    out.append(analyze_bytes(_sample_pcap(tmp_path)[0])[1])
+    return out
+
+
+def test_every_rule_has_a_complete_playbook():
+    import re
+    from src import playbooks as P
+    from src.mitre import MITRE_MAP
+    books = P.load_playbooks()
+    assert set(books) == set(MITRE_MAP)
+    for rule, pb in books.items():
+        assert P.REQUIRED <= set(pb) and set(pb["five_ws"]) == set(P.FIVE_WS), rule
+        assert pb["base_signal"]["lean"] in ("TP", "FP", "info"), rule
+        placeholders = set(re.findall(r"{(\w+)}", pb["comment_template"]))
+        assert set(P.FIVE_WS) | {"verdict"} >= placeholders, rule
+    assert "5 Ws" in P.method_guide()
+
+
+def test_playbooks_fill_every_sample_alert(tmp_path):
+    import re
+    from src import playbooks as P
+    for alerts in _all_sample_alerts(tmp_path):
+        for a in alerts:
+            pb = P.get_playbook(a["rule"])
+            ws = P.fill_five_ws(pb, a, alerts)
+            assert ws["why"]["auto"] == "", a["rule"]               # the Why is always the analyst's
+            filled = " ".join(v["auto"] for v in ws.values()) + P.draft_comment(pb, a, {}, "", alerts)
+            assert not re.search(r"(?<![\w.])\?(?![\w])", filled), (a["rule"], filled)
+
+
+def test_verdict_suggestion_and_comment():
+    from src import playbooks as P
+    lines, _ = generate_linux_log()
+    _, alerts = analyze_text("\n".join(lines))
+    a = next(x for x in alerts if x["rule"] == "success_after_failures")
+    pb = P.get_playbook(a["rule"])
+    assert P.suggest_verdict(P.evidence_signals(pb, a, alerts))[0] == "Likely True Positive"
+    internal = dict(next(x for x in alerts if x["rule"] == "brute_force"), source_ip="10.0.0.9", users=["svc_backup"])
+    assert P.suggest_verdict(P.evidence_signals(P.get_playbook("brute_force"), internal))[0] != "Likely True Positive"
+    c = P.draft_comment(pb, a, {"why": "No change ticket exists."}, "True Positive", alerts)
+    assert "No change ticket exists." in c and "Verdict: True Positive" in c and "203.0.113.50" in c
+
+
+def test_worksheet_saved_with_case(tmp_path):
+    from src import db
+    path = str(tmp_path / "ws.db")
+    db.init_db(path)
+    lines, _ = generate_linux_log()
+    df, alerts = analyze_text("\n".join(lines))
+    _, ids = db.save_analysis("auth.log", df, alerts, path=path)
+    ws = {"answers": {"who": "root from 203.0.113.50", "why": "No ticket"}, "verdict": "True Positive", "comment": "c"}
+    db.save_worksheet(ids[0], ws, "alice", path=path)
+    got = db.get_worksheet(ids[0], path=path)
+    assert got["verdict"] == "True Positive" and got["author"] == "alice" and got["answers"]["why"] == "No ticket"
+    last = db.get_activity(ids[0], path=path)[-1]
+    assert last["action"] == "worksheet" and "Why: No ticket" in last["detail"]
+
+
+def test_playbook_api(monkeypatch, tmp_path):
+    from src import db
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "pbapi.db"))
+    db.init_db()
+    from api.main import app
+    c = TestClient(app)
+    assert len(c.get("/playbooks").json()) == 19
+    assert c.get("/playbooks/nope").status_code == 404
+    lines, _ = generate_linux_log()
+    first = c.post("/upload-logs", files={"file": ("auth.log", "\n".join(lines))}).json()["alerts"][0]
+    r = c.get(f"/playbooks/{first['rule']}", params={"alert_id": first["id"]}).json()
+    assert r["five_ws"]["who"]["auto"] and r["suggested_verdict"][0] == "Likely True Positive"
+    body = {"answers": {"why": "unknown external IP"}, "verdict": "True Positive", "comment": "closing", "author": "bob"}
+    assert c.put(f"/alerts/{first['id']}/worksheet", json=body).json()["author"] == "bob"
+    assert c.get(f"/alerts/{first['id']}/worksheet").json()["verdict"] == "True Positive"

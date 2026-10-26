@@ -1,0 +1,36 @@
+rule: invalid_user_probing
+title: Invalid-user probing (account enumeration)
+group: Logs
+summary: >-
+  One IP tries usernames that do not exist on the system (guest, pi, jenkins, oracle). It is reconnaissance:
+  the attacker is learning which accounts exist.
+why_attackers: >-
+  Knowing valid usernames halves the work of guessing passwords. Default and service account names are
+  tried first because they are often left enabled with weak passwords.
+base_signal: {lean: info, text: "{count} attempts with non-existent usernames: reconnaissance, usually automated internet scanning"}
+five_ws:
+  who: {ask: "Which IP, and which usernames were tried?", auto: "{source_ip} ({ip_type}) tried: {users}"}
+  what: {ask: "How many attempts, and did any username exist?", auto: "{count} invalid-user attempts; also from this IP: {related_rules}"}
+  when: {ask: "When, and is it ongoing?", auto: "{date}, {start_time} for {duration}"}
+  where: {ask: "Which server is exposed?", auto: "{host}"}
+  why: {ask: "Is this a known internal scanner or an authorised test?", auto: ""}
+  how: {ask: "Technique?", auto: "{mitre_id} {mitre_name}: guessing account names before guessing passwords"}
+true_positive_signs:
+  - External IP cycling through default and service account names
+  - Followed by brute force or a login from the same IP
+false_positive_signs:
+  - An internal scanner or a misconfigured script with a wrong username
+investigate:
+  - Check whether the same IP moved on to password attempts or a login
+  - Check whether any tried name matches a real, enabled account
+verdict_guide:
+  true_positive: External enumeration is real but usually low impact on its own; close as True Positive with a block, raise priority if followed by guessing.
+  false_positive: Traced to a known internal tool or script with a wrong username.
+  escalate: Only if the same IP followed up with successful logins or targeted real privileged accounts.
+comment_template: >-
+  Invalid-user probing. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: block the source and watch for follow-up attempts.
+next_steps:
+  - Block the source IP
+  - Disable unused default accounts
+  - Keep SSH keys-only and hide login services behind VPN where possible

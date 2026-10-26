@@ -1,0 +1,39 @@
+rule: odd_hour_login
+title: Login at an unusual hour
+group: Logs
+summary: >-
+  A successful login between midnight and 05:00. It can be a stolen password used while the owner sleeps,
+  or perfectly innocent (on-call, travel, a different time zone).
+why_attackers: >-
+  Attackers often act at night or on weekends, when nobody is watching and the real user will not notice
+  a second session.
+base_signal: {lean: info, text: "A successful login at {start_time}: unusual timing alone is not proof"}
+five_ws:
+  who: {ask: "Which account, from which IP? Is that IP normal for this user?", auto: "{users} from {source_ip} ({ip_type})"}
+  what: {ask: "Just a login, or followed by activity? Any failures before it?", auto: "Successful login; also from this IP: {related_rules}"}
+  when: {ask: "Exact time, and the user's normal working pattern?", auto: "{date} at {start_time}"}
+  where: {ask: "Which system, and is it sensitive?", auto: "{host}"}
+  why: {ask: "Is the user on call, travelling, or working late? Ask them or their manager.", auto: ""}
+  how: {ask: "Technique?", auto: "{mitre_id} {mitre_name}: valid credentials used outside normal hours"}
+true_positive_signs:
+  - The user denies it, or is known to be on leave
+  - Source IP or country never used by this user before
+  - Suspicious activity after the login
+false_positive_signs:
+  - The user confirms on-call or late work from a known device
+  - The source is the company VPN or the user's usual IP
+investigate:
+  - Ask the user (or their manager) whether it was them
+  - Compare the source IP with the user's previous logins
+  - Review what the session did
+verdict_guide:
+  true_positive: The user denies it, or the source is new and the session did anything suspicious.
+  false_positive: The user confirms it and the source matches their usual pattern. Close as False Positive or Benign True Positive.
+  escalate: The user denies it, or the account is privileged and cannot be confirmed quickly.
+comment_template: >-
+  Odd-hour login. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: confirm with the user; if denied, reset and escalate.
+next_steps:
+  - Confirm with the user
+  - If not them, disable the account, reset credentials and escalate
+  - Consider conditional access (location, device, time) for this account

@@ -1,0 +1,38 @@
+rule: audit_log_cleared
+title: Security audit log cleared (Event 1102)
+group: Logs
+summary: >-
+  Someone cleared the Windows Security log. Legitimate clearing is rare; attackers do it to erase the
+  evidence of what they just did.
+why_attackers: >-
+  Covering tracks (defense evasion). Without the local log, investigators lose logons, process starts
+  and account changes, unless a copy already reached the SIEM.
+base_signal: {lean: TP, text: "Clearing the Security log is almost never legitimate and is a classic cover-up step"}
+five_ws:
+  who: {ask: "Which account cleared it?", auto: "{users} (session from {source_ip}, {ip_type})"}
+  what: {ask: "What happened just before the clear? Pull the SIEM's copy of the log.", auto: "{description} Also from this IP: {related_rules}"}
+  when: {ask: "When, and inside a maintenance window?", auto: "{date} at {start_time}"}
+  where: {ask: "Which system? A domain controller is critical.", auto: "{host}"}
+  why: {ask: "Was there an approved reason (a log-size problem fixed by IT, with a ticket)?", auto: ""}
+  how: {ask: "Technique?", auto: "{mitre_id} {mitre_name}"}
+true_positive_signs:
+  - No change ticket
+  - Preceded by other alerts from the same account or IP (new account, PowerShell, failed logins)
+  - Done outside working hours or on a domain controller
+false_positive_signs:
+  - Approved maintenance by IT, with a ticket, and nothing suspicious before it
+investigate:
+  - Retrieve the logs from the SIEM for the period before the clear
+  - Review the clearing account's other activity
+  - Check other hosts for the same account
+verdict_guide:
+  true_positive: The default for this alert unless a documented reason exists.
+  false_positive: Only with an approved ticket that explains it; close as Benign True Positive.
+  escalate: Immediately, with the SIEM copy of the events before the clear.
+comment_template: >-
+  Audit log cleared. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: escalate, isolate the host and rebuild the timeline from the SIEM.
+next_steps:
+  - Escalate and isolate the host
+  - Rebuild the timeline from SIEM data
+  - Restrict the "Manage auditing and security log" right; forward logs centrally in real time

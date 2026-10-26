@@ -1,0 +1,42 @@
+rule: brute_force
+title: Brute force (password guessing)
+group: Logs
+summary: >-
+  Many failed logins from one IP in a few minutes: someone is guessing passwords, usually for root,
+  administrator or another well-known account.
+why_attackers: >-
+  Guessing is cheap and automated. Internet-facing SSH and RDP servers see it every day; one weak
+  password is enough to get in.
+base_signal: {lean: TP, text: "{count} failed logins in a short burst is automated guessing, not a person mistyping"}
+five_ws:
+  who: {ask: "Which IP is guessing, is it internal or external, and which accounts are targeted?", auto: "{source_ip} ({ip_type}) targeting {users}"}
+  what: {ask: "How many failures, and did any attempt from this IP succeed?", auto: "{count} failed logins; also triggered by this IP: {related_rules}"}
+  when: {ask: "When did it start and how long did it last?", auto: "{date}, {start_time} for {duration}"}
+  where: {ask: "Which server, and is the login service meant to be exposed?", auto: "{host}"}
+  why: {ask: "Any legitimate reason? A user locked out of a script, a vulnerability scan, a misconfigured service account?", auto: ""}
+  how: {ask: "Which technique and service?", auto: "{mitre_id} {mitre_name}, password guessing against the login service"}
+true_positive_signs:
+  - External IP with no business relationship
+  - Targets root, administrator or many accounts
+  - Very fast attempts (seconds apart) from one IP
+  - A successful login from the same IP afterwards (escalate immediately)
+false_positive_signs:
+  - Internal IP of a known scanner or monitoring tool
+  - One user's own machine with an old saved password (same account, regular retries)
+  - A service account with an expired password retrying on a schedule
+investigate:
+  - Check for any successful login (4624 / Accepted) from the same IP after the failures
+  - Look up the IP's reputation (AbuseIPDB, VirusTotal) and country
+  - Check whether the same IP hit other servers
+  - Confirm the targeted accounts exist and are meant to log in remotely
+verdict_guide:
+  true_positive: External or unknown source guessing passwords, even without success. Block, and escalate if any login succeeded.
+  false_positive: Traced to a known internal tool or a user's stale saved password, with no successful malicious login.
+  escalate: Any successful login from the source, a privileged account targeted from outside, or the same IP active elsewhere.
+comment_template: >-
+  Brute-force alert. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: block the source and confirm no attempt succeeded.
+next_steps:
+  - Block the source IP at the firewall
+  - Enable account lockout or fail2ban, and prefer SSH keys or MFA over passwords
+  - Restrict the login service to VPN or an allow-list

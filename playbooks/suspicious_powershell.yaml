@@ -1,0 +1,39 @@
+rule: suspicious_powershell
+title: Suspicious PowerShell (Event 4688)
+group: Logs
+summary: >-
+  PowerShell ran with an encoded command (-enc), a hidden window (-w hidden), or code that downloads and
+  runs something in memory (IEX, DownloadString). Admin scripts rarely need any of these.
+why_attackers: >-
+  PowerShell is on every Windows machine (living off the land). Encoding hides the command from casual
+  reading and simple filters; running from memory leaves no file for antivirus to scan.
+base_signal: {lean: TP, text: "Encoded, hidden or download-and-run PowerShell is a classic malware pattern"}
+five_ws:
+  who: {ask: "Which user ran it, and is it a person or a service?", auto: "{users} (session from {source_ip}, {ip_type})"}
+  what: {ask: "What does the command really do? Decode the Base64 (CyberChef) and read it.", auto: "{description}"}
+  when: {ask: "When, and what happened just before (an email, a download, a login)?", auto: "{date} at {start_time}; also from this IP: {related_rules}"}
+  where: {ask: "Which host?", auto: "{host}"}
+  why: {ask: "Is this a known IT or deployment script? Which parent process started it (Word, Excel, a browser)?", auto: ""}
+  how: {ask: "Technique?", auto: "{mitre_id} {mitre_name}: PowerShell execution"}
+true_positive_signs:
+  - The decoded command downloads or runs code from the internet
+  - Parent process is Office, a browser, or an unusual program
+  - Run by a regular user, or right after a suspicious login
+false_positive_signs:
+  - A signed, known management script (SCCM, Intune) with a documented encoded parameter
+  - Parent is the usual deployment agent, on many machines at the same time
+investigate:
+  - Decode and read the command
+  - Check the parent process and the process tree
+  - Look for network connections and new files from the process; check 4104 script-block logs
+verdict_guide:
+  true_positive: The decoded command is malicious or the parent process is unusual.
+  false_positive: Traced to a known management tool with a matching script.
+  escalate: Any malicious command; isolate the host through EDR if the playbook allows.
+comment_template: >-
+  Suspicious PowerShell. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: decode the command, check the parent process, isolate if malicious.
+next_steps:
+  - Isolate the host if the command is malicious
+  - Collect IOCs (URLs, hashes) from the decoded command
+  - Enable PowerShell script-block logging (4104) and constrained language mode

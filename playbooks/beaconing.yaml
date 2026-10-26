@@ -1,0 +1,39 @@
+rule: beaconing
+title: Beaconing (regular check-ins)
+group: Network
+summary: >-
+  A host connected to the same server over and over at almost exactly the same interval. People browse
+  irregularly; malware checks in with its command-and-control (C2) server on a timer.
+why_attackers: >-
+  An implant needs to ask its operator for instructions. Regular check-ins over HTTPS blend into normal web
+  traffic, but their timing gives them away.
+base_signal: {lean: TP, text: "{count} connections at near-constant intervals is machine behaviour, typical of C2"}
+five_ws:
+  who: {ask: "Which internal host is beaconing?", auto: "{source_ip} ({ip_type})"}
+  what: {ask: "How regular, how often, how much data each time?", auto: "{description}"}
+  when: {ask: "Since when? What happened on the host just before it started?", auto: "{date}, {start_time} for {duration}"}
+  where: {ask: "Which destination, what is it, and what is its reputation?", auto: "destination {peer_ip} ({peer_type})"}
+  why: {ask: "Is it a legitimate updater or monitoring agent (antivirus, NTP, telemetry, backup)?", auto: ""}
+  how: {ask: "Technique and evidence?", auto: "{mitre_id} {mitre_name}. Wireshark: {wireshark_filter}"}
+true_positive_signs:
+  - Unknown or newly registered destination
+  - Only one host talks to it
+  - Started right after a suspicious download, email or alert on the host
+false_positive_signs:
+  - The destination belongs to a known vendor (updates, antivirus, monitoring)
+  - Many company hosts show the same pattern to the same vendor
+investigate:
+  - Check the destination's reputation, certificate and SNI name
+  - Find the process making the connections (EDR)
+  - Check what happened on the host when the beaconing started
+verdict_guide:
+  true_positive: An unknown destination contacted by one host on a timer.
+  false_positive: A known agent or vendor service, seen across many hosts.
+  escalate: An unknown destination, a bad reputation, or a link to other alerts on the host.
+comment_template: >-
+  Beaconing. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: identify the process, isolate the host and block the destination.
+next_steps:
+  - Isolate the host and identify the process
+  - Block the destination IP and domain
+  - Hunt for the same destination across all hosts

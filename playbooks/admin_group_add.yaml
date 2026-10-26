@@ -1,0 +1,40 @@
+rule: admin_group_add
+title: Member added to a privileged group (Event 4732)
+group: Logs
+summary: >-
+  An account was added to Administrators, Domain Admins, Enterprise Admins or Schema Admins. Admin rights
+  are the keys to the kingdom, so every unexplained addition matters.
+why_attackers: >-
+  Privilege escalation and persistence in one step: a normal or freshly created account becomes an
+  admin, which lets the attacker do anything and survive password resets.
+base_signal: {lean: TP, text: "A privileged group changed; this always needs a documented reason"}
+five_ws:
+  who: {ask: "Who made the change, and who was added?", auto: "Changed by {users} from {source_ip} ({ip_type})"}
+  what: {ask: "Which group, which member?", auto: "{description} Also from this IP: {related_rules}"}
+  when: {ask: "When, and inside a change window?", auto: "{date} at {start_time}"}
+  where: {ask: "On which system? A domain controller change affects the whole domain.", auto: "{host}"}
+  why: {ask: "Is there an approved change request for this exact member and group?", auto: ""}
+  how: {ask: "Technique?", auto: "{mitre_id} {mitre_name}: granting admin rights"}
+true_positive_signs:
+  - No approved change
+  - The added member was created minutes earlier (4720 just before)
+  - The changing account had suspicious logins or failures before
+  - Outside working hours
+false_positive_signs:
+  - Matches an approved change for this person and group
+  - Temporary admin rights granted by the usual identity team, with an expiry
+investigate:
+  - Check change management for this group change
+  - Review the new member's account age and recent activity
+  - Review the changing account's session (how did it log in, from where)
+verdict_guide:
+  true_positive: No approval, or tied to other suspicious activity (new account, odd login, failures).
+  false_positive: Approved change; close as Benign True Positive with the change reference.
+  escalate: Any unapproved addition to a privileged group, immediately.
+comment_template: >-
+  Privileged group change. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: if unapproved, remove the member, reset its credentials and escalate.
+next_steps:
+  - Remove the member if unapproved and reset its credentials
+  - Review what the account did with admin rights
+  - Alert on every change to privileged groups

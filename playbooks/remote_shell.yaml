@@ -1,0 +1,39 @@
+rule: remote_shell
+title: Remote shell on the wire
+group: Network
+summary: >-
+  A command-prompt banner (Microsoft Windows [Version ...], C:\...>) or root id output travelled inside a
+  TCP connection: someone is typing commands on that machine remotely.
+why_attackers: >-
+  An interactive shell is the attacker's goal after an exploit: full hands-on control. Reverse shells
+  connect outwards so they pass most firewalls, sometimes on ports like 53 or 80 to look harmless.
+base_signal: {lean: TP, text: "A command shell is visible inside network traffic: hands-on-keyboard access"}
+five_ws:
+  who: {ask: "Which host is serving the shell, and who is controlling it?", auto: "shell on {source_ip} ({ip_type}), controlled from {peer_ip} ({peer_type})"}
+  what: {ask: "Which commands were typed? Follow the TCP stream and read them.", auto: "{description}"}
+  when: {ask: "When did the session start, and what preceded it (an exploit, a download)?", auto: "{date} at {start_time}; also involving this host: {related_rules}"}
+  where: {ask: "Which ports and which server? Is it internet-facing?", auto: "{host}"}
+  why: {ask: "Is it an approved remote-administration session (rare in plain text)?", auto: ""}
+  how: {ask: "Technique and evidence?", auto: "{mitre_id} {mitre_name}. Wireshark: {wireshark_filter}"}
+true_positive_signs:
+  - Reverse direction (the victim connected out to the controller)
+  - Unusual port for a shell (53, 80, 4444)
+  - Preceded by shellcode, a suspicious download or an exploit
+  - Reconnaissance commands typed (whoami, net group "Domain Admins", nltest)
+false_positive_signs:
+  - An approved administration tool on an isolated lab network (very rare in cleartext)
+investigate:
+  - Follow the TCP stream and list the commands and outputs
+  - Find what spawned the shell on the host (process tree via EDR)
+  - Check the controller IP across all hosts
+verdict_guide:
+  true_positive: The default, because a cleartext shell is an active compromise.
+  false_positive: Only a documented lab or admin session.
+  escalate: Immediately, and isolate the host if the playbook allows.
+comment_template: >-
+  Remote shell. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: isolate the host immediately and escalate to incident response.
+next_steps:
+  - Isolate the host now
+  - Capture memory and the process tree before rebooting
+  - Block the controller IP and hunt for it on other hosts

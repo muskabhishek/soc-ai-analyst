@@ -1,0 +1,39 @@
+rule: suspicious_download
+title: Executable downloaded over HTTP
+group: Network
+summary: >-
+  A host downloaded a program or script (.exe, .dll, .ps1, .hta...) over plain HTTP, or a file whose first
+  bytes are a Windows executable header even though its name says otherwise (logo.jpg).
+why_attackers: >-
+  This is how malware arrives after a phishing click or an exploit (ingress tool transfer). Renaming the
+  file to an image or document tries to slip past filters.
+base_signal: {lean: TP, text: "Executable content fetched over unencrypted HTTP is a common malware delivery step"}
+five_ws:
+  who: {ask: "Which host downloaded it, and which user was logged in?", auto: "{source_ip} ({ip_type})"}
+  what: {ask: "Which file? Get its hash and check it (VirusTotal).", auto: "{description}"}
+  when: {ask: "When, and what happened just before (email, browser visit, exploit)?", auto: "{date} at {start_time}; same host also triggered: {related_rules}"}
+  where: {ask: "From which server and domain? Reputation?", auto: "server {peer_ip} ({peer_type})"}
+  why: {ask: "Was it legitimate software from the vendor's own site, installed on purpose by IT or the user?", auto: ""}
+  how: {ask: "Technique and evidence?", auto: "{mitre_id} {mitre_name}. Wireshark: {wireshark_filter}"}
+true_positive_signs:
+  - The file name does not match its content (an executable named .jpg or .pdf)
+  - Unknown or new domain, or an IP address instead of a domain
+  - Followed by new connections or alerts from the same host
+false_positive_signs:
+  - A signed installer from the vendor's official site, expected by IT
+  - A software deployment tool downloading packages
+investigate:
+  - Extract the file only in an isolated sandbox (Wireshark Export Objects); hash it and check VirusTotal
+  - Check whether the file ran on the host (EDR, 4688)
+  - Look up the source domain and IP
+verdict_guide:
+  true_positive: An unknown source, a disguised file, or a malicious hash.
+  false_positive: Legitimate, expected software from the official vendor.
+  escalate: The file ran on the host, or its hash is known malware.
+comment_template: >-
+  Executable download. Who: {who}. What: {what}. When: {when}. Where: {where}. Why: {why}.
+  How: {how}. Verdict: {verdict}. Next step: hash the file in a sandbox and check whether it was executed.
+next_steps:
+  - Quarantine the file and isolate the host if it ran
+  - Block the source domain and IP
+  - Enforce HTTPS and download filtering for executables
