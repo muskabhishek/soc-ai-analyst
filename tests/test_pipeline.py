@@ -355,3 +355,25 @@ def test_playbook_api(monkeypatch, tmp_path):
     body = {"answers": {"why": "unknown external IP"}, "verdict": "True Positive", "comment": "closing", "author": "bob"}
     assert c.put(f"/alerts/{first['id']}/worksheet", json=body).json()["author"] == "bob"
     assert c.get(f"/alerts/{first['id']}/worksheet").json()["verdict"] == "True Positive"
+
+
+# ---------------- web UI endpoints ----------------
+
+def test_web_api_endpoints(monkeypatch, tmp_path):
+    from src import db
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "web.db"))
+    db.init_db()
+    from api.main import app
+    c = TestClient(app)
+    assert c.post("/samples/nope").status_code == 404
+    up = c.post("/samples/pcap").json()
+    assert up["kind"] == "pcap" and len(up["alerts"]) == 12
+    ov = c.get(f"/uploads/{up['upload_id']}").json()["overview"]
+    assert ov["kpis"]["events"] == 865 and ov["timeline"]["points"] and ov["top_ports"] and ov["dns"]
+    assert c.get("/uploads").json()[0]["alerts"] == 12
+    aid = up["alerts"][0]["id"]
+    assert c.post(f"/alerts/{aid}/triage", json={"status": "Closed"}).status_code == 422     # verdict required
+    r = c.post(f"/alerts/{aid}/triage", json={"status": "Closed", "verdict": "True Positive",
+                                               "answers": {"why": "unapproved shell"}, "author": "ana"}).json()
+    assert r["alert"]["status"] == "Closed" and "unapproved shell" in r["worksheet"]["comment"]
+    assert "5 Ws" in c.get("/method").json()["markdown"]

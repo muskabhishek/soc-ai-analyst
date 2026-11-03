@@ -14,6 +14,7 @@ import streamlit as st
 
 from src import db
 from src.llm import OLLAMA_MODEL, explain_alert, incident_report, ollama_available
+from src.overview import build_overview
 from src.pipeline import analyze_bytes
 from ui import SEV_COLORS, SEV_DOTS, SEV_ORDER, apply_style, hero, kpi, render_worksheet, styled
 
@@ -67,7 +68,7 @@ if data is not None:
     st.session_state.pop("report", None)
     st.session_state["db_ids"] = {}
     if not df.empty:
-        upload_id, ids = db.save_analysis(name, df, alerts)
+        upload_id, ids = db.save_analysis(name, df, alerts, kind=kind, overview=build_overview(df, alerts, kind))
         st.session_state["db_ids"] = {a["alert_id"]: i for a, i in zip(alerts, ids)}
 
 hero()

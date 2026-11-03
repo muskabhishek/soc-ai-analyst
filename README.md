@@ -4,6 +4,7 @@
 ![python](https://img.shields.io/badge/python-3.12-blue)
 ![rules](https://img.shields.io/badge/detection%20rules-19-red)
 ![MITRE](https://img.shields.io/badge/MITRE%20ATT%26CK-mapped-orange)
+![web](https://img.shields.io/badge/web-Next.js%20%2B%20Tailwind-black)
 
 A **defensive**, fully local tool that does the work of a Tier-1 SOC analyst. It reads **security logs** (Linux SSH,
 Windows Security events) and **Wireshark packet captures**, detects attacks with 19 rules, maps each one to
@@ -17,7 +18,7 @@ report. Every rule is also provided as a **Splunk SPL** and **Microsoft Sentinel
 
 | Test | Result |
 |---|---|
-| Planted attacks in generated logs and captures (24 attacks across Linux, Windows and network data) | **all detected, no false positives** (25 automated tests) |
+| Planted attacks in generated logs and captures (24 attacks across Linux, Windows and network data) | **all detected, no false positives** (26 automated tests) |
 | Real SSH log from an internet-facing server (86,839 lines) | **236 alerts, 0 on internal IPs**, 2 root brute-force bursts, ~10 s ([write-up](docs/real-data-results.md)) |
 | 13 real public packet captures (~107,600 packets) | **4 of 7 attacks detected, 0 of 6 normal captures flagged** ([write-up](docs/pcap-real-results.md)) |
 
@@ -25,13 +26,26 @@ Testing on real data changed the code: it exposed a log format the rules did not
 positive on a 90 MB Linux ISO download, and three attacks that needed new detections. Each write-up lists what was
 missed and what would catch it.
 
-## Screenshots
+## Web app
 
-| Packet-capture analysis | Alert with its Wireshark filter |
+A responsive **Next.js + Tailwind CSS** front end (in [web/](web/)) on top of the FastAPI backend. It follows the
+device's **light or dark** setting (with a manual switch) and adapts from **desktop to phone**: a sidebar on large
+screens, bottom tabs on a phone, tables that turn into cards.
+
+| Overview (light) | Overview (dark) |
 |---|---|
-| ![PCAP overview](docs/images/dashboard-pcap.png) | ![Alert investigation](docs/images/dashboard-alert.png) |
-| **Log analysis** | **Case queue with cross-source correlation** |
-| ![Log overview](docs/images/dashboard-auth.png) | ![Case queue](docs/images/dashboard-cases.png) |
+| ![Overview light](docs/images/web-overview-light.png) | ![Overview dark](docs/images/web-overview-dark.png) |
+| **Alert triage with the 5W worksheet** | **Case queue, SOC metrics and correlations** |
+| ![Alert](docs/images/web-alert-dark.png) | ![Cases](docs/images/web-cases-light.png) |
+
+| Phone: overview | Phone: alert | Phone: playbook |
+|---|---|---|
+| ![Phone overview](docs/images/web-phone-overview-light.png) | ![Phone alert](docs/images/web-phone-alert-dark.png) | ![Phone playbook](docs/images/web-phone-playbook-dark.png) |
+
+Pages: **Overview** (upload or load a sample, KPIs, activity timeline, severity, top sources, MITRE, ports, DNS and HTTP),
+**Alert** (facts, Wireshark filter, 5W triage with suggested verdict, AI explanation, evidence, audit trail),
+**Cases** (MTTA, MTTR, false-positive rate per rule, cross-source attackers, queue), **Playbooks**, and a printable
+**Incident report**. The original Streamlit dashboard ([dashboard/](dashboard/)) still works as a quick local UI.
 
 ## How it works
 
@@ -124,9 +138,14 @@ which shows which detections need tuning.
 ```bash
 pip install -r requirements.txt
 python -m src.generator                 # sample auth.log, Windows CSV and capture.pcap with hidden attacks
-python -m pytest -q tests               # 25 tests: every planted attack found, no false positives
-streamlit run dashboard/app.py          # UI  -> http://localhost:8501  (or /?sample=pcap for an instant demo)
+python -m pytest -q tests               # 26 tests: every planted attack found, no false positives
 uvicorn api.main:app --reload           # API -> http://127.0.0.1:8000/docs
+
+# web app (Node 20.9+), in a second terminal
+cd web && npm install && npm run dev    # UI  -> http://localhost:3000  (any phone on the same Wi-Fi: http://<pc-ip>:3000)
+
+# or the simpler Streamlit UI
+streamlit run dashboard/app.py          # UI  -> http://localhost:8501  (or /?sample=pcap for an instant demo)
 
 # optional
 ollama pull llama3.2                    # AI-written explanations (otherwise a fixed template is used)
@@ -147,6 +166,9 @@ Environment variables: `OLLAMA_URL` (default `http://localhost:11434`), `OLLAMA_
 | `GET /metrics` | queue by status, MTTA, MTTR, false-positive rate overall and per rule |
 | `GET /playbooks`, `GET /playbooks/{rule}?alert_id=` | triage playbooks; with an alert: pre-filled 5 Ws, evidence signals, suggested verdict, drafted comment |
 | `GET`/`PUT /alerts/{id}/worksheet` | the analyst's saved 5W worksheet, verdict and closing comment |
+| `POST /samples/{auth,windows,pcap}` | analyse a bundled sample as if it had been uploaded |
+| `GET /uploads`, `GET /uploads/{id}` | upload history / one upload with its chart summary and alerts |
+| `POST /alerts/{id}/triage` | save the 5W worksheet, verdict, assignee and status in one step |
 | `GET /report/{upload_id}` | full Markdown incident report |
 | `GET /stats`, `GET /health` | counters / Ollama status |
 
@@ -161,11 +183,13 @@ src/
   db.py              SQLite, case workflow, worksheets, metrics, correlations
   playbooks.py       5W auto-fill, evidence signals, suggested verdict, drafted comment
   pipeline.py        runs the steps          generator.py      sample data with planted attacks
-api/main.py          FastAPI backend         dashboard/        app.py + pages/1_Triage_Playbook.py
+  overview.py        chart-ready summary of each upload (timeline, top sources, ports, DNS, HTTP)
+api/main.py          FastAPI backend         web/              Next.js + Tailwind web app
+dashboard/           Streamlit UI (app.py + pages/1_Triage_Playbook.py)
 detections/          Splunk SPL and Sentinel KQL versions of the log rules
 scripts/             real-data benchmarks    docs/             results and screenshots
 playbooks/           one triage playbook per rule (YAML) + the 5W method
-tests/               25 automated tests
+tests/               26 automated tests (CI also lints and builds the web app)
 ```
 
 ## Supported inputs

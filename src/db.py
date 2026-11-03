@@ -11,6 +11,7 @@ DISPOSITIONS = ["True Positive", "Benign True Positive", "False Positive"]
 
 # columns added after the first version; init_db() adds them to an existing database
 _MIGRATIONS = {
+    "uploads": {"kind": "TEXT", "overview": "TEXT"},
     "logs": {"target_user": "TEXT", "detail": "TEXT"},
     "alerts": {"status": "TEXT DEFAULT 'New'", "disposition": "TEXT", "assignee": "TEXT", "created_at": "TEXT",
                "acknowledged_at": "TEXT", "closed_at": "TEXT"},
@@ -54,12 +55,13 @@ def init_db(path=None):
         c.execute("UPDATE alerts SET status='New' WHERE status IS NULL")
 
 
-def save_analysis(filename, df, alerts, path=None):
-    """Store one upload with its events and alerts. Returns (upload_id, list of alert DB ids)."""
+def save_analysis(filename, df, alerts, path=None, kind=None, overview=None):
+    """Store one upload with its events, alerts and chart summary. Returns (upload_id, list of alert DB ids)."""
     cols = ["timestamp", "host", "user", "source_ip", "event_type", "status", "source_log", "target_user", "detail"]
     now = _now()
     with conn(path) as c:
-        up = c.execute("INSERT INTO uploads(filename, n_events) VALUES(?,?)", (filename, len(df))).lastrowid
+        up = c.execute("INSERT INTO uploads(filename, n_events, kind, overview) VALUES(?,?,?,?)",
+                       (filename, len(df), kind, json.dumps(overview) if overview else None)).lastrowid
         if len(df):
             d = df.reindex(columns=cols, fill_value="").copy()
             d["timestamp"] = d["timestamp"].astype(str)
@@ -97,11 +99,33 @@ def get_alert(alert_id, path=None):
         if not r:
             return None
         a = json.loads(r["payload"])
-        a.update({k: r[k] for k in ("status", "disposition", "assignee", "created_at", "acknowledged_at", "closed_at")})
+        a.update({k: r[k] for k in ("status", "disposition", "assignee", "created_at", "acknowledged_at", "closed_at",
+                                    "upload_id")})
         a["db_id"] = alert_id
         rep = c.execute("SELECT text,source,warnings FROM reports WHERE alert_id=?", (alert_id,)).fetchone()
         a["report"] = {"text": rep["text"], "source": rep["source"], "warnings": json.loads(rep["warnings"])} if rep else None
         return a
+
+
+def list_uploads(limit=50, path=None):
+    """Most recent uploads with their alert counts."""
+    with conn(path) as c:
+        return [dict(r) for r in c.execute("""
+            SELECT u.id, u.filename, u.n_events, u.kind, u.created_at, COUNT(a.id) AS alerts,
+                   SUM(a.severity IN ('Critical','High')) AS urgent, SUM(a.status != 'Closed') AS open
+            FROM uploads u LEFT JOIN alerts a ON a.upload_id = u.id
+            GROUP BY u.id ORDER BY u.id DESC LIMIT ?""", (limit,))]
+
+
+def get_upload(upload_id, path=None):
+    with conn(path) as c:
+        r = c.execute("SELECT id, filename, n_events, kind, overview, created_at FROM uploads WHERE id=?",
+                      (upload_id,)).fetchone()
+        if not r:
+            return None
+        u = dict(r)
+        u["overview"] = json.loads(u["overview"]) if u["overview"] else None
+        return u
 
 
 def save_report(alert_id, text, source, warnings, path=None):
