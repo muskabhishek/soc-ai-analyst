@@ -98,9 +98,11 @@ export function ErrorBox({ error }: { error: unknown }) {
   const msg = error instanceof Error ? error.message : String(error);
   return (
     <div className="rounded-xl border border-crit/30 bg-[color-mix(in_oklab,var(--crit)_8%,transparent)] p-3 text-sm text-crit">
-      {msg.includes("fetch") || msg.includes("502") || msg.includes("500")
+      {msg.includes("Failed to fetch") || msg.includes("502")
         ? "Cannot reach the API. Start it with: uvicorn api.main:app"
-        : msg}
+        : msg.includes("Internal Server Error") || msg.includes("413")
+          ? "The analysis did not finish: the file may be too large or the server stopped. Check the API window for errors."
+          : msg}
     </div>
   );
 }

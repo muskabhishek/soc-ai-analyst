@@ -1,7 +1,7 @@
 "use client";
 
 import { FileText, Network, ScrollText, UploadCloud } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button, ErrorBox } from "./ui";
@@ -17,6 +17,15 @@ export function UploadPanel({ onDone, compact }: { onDone: (uploadId: number) =>
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [seconds, setSeconds] = useState(0);
+
+  // live timer while a file is analysed: a 100k+ packet capture takes a minute or more
+  useEffect(() => {
+    if (!busy) return;
+    const started = Date.now();
+    const t = setInterval(() => setSeconds(Math.round((Date.now() - started) / 1000)), 1000);
+    return () => { clearInterval(t); setSeconds(0); };
+  }, [busy]);
 
   async function run(label: string, job: () => Promise<{ upload_id: number }>) {
     setBusy(label);
@@ -53,7 +62,11 @@ export function UploadPanel({ onDone, compact }: { onDone: (uploadId: number) =>
         <p className="mt-2 text-sm font-semibold">
           {busy ? `Analysing ${busy}…` : "Drop a file here or tap to upload"}
         </p>
-        <p className="mt-1 text-xs text-muted">Linux auth.log · Windows Security CSV · Wireshark .pcap / .pcapng</p>
+        <p className="mt-1 text-xs text-muted">
+          {busy
+            ? `${seconds}s · large captures (100k+ packets) can take a minute or two, keep this tab open`
+            : "Linux auth.log · Windows Security CSV · Wireshark .pcap / .pcapng (up to 500 MB)"}
+        </p>
         <input
           ref={input}
           type="file"
